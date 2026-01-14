@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed:dummy": "node scripts/seed-dummy-data.mjs"
   },
   "dependencies": {
     "@line/liff": "^2.27.3",
