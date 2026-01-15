@@ -288,6 +288,39 @@ const tools: OpenAI.Responses.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    type: 'function',
+    name: 'top_subjects_with_examples',
+    description:
+      '指定大学の subject_rollups から上位科目を返し、各科目の好評レビュー例（本文）も取得する。',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        university_id: { type: 'string', description: 'universities.id (uuid)' },
+        metric: {
+          type: 'string',
+          enum: [
+            'avg_satisfaction',
+            'avg_recommendation',
+            'avg_class_difficulty',
+            'avg_assignment_load',
+            'avg_attendance_strictness',
+            'avg_credit_ease',
+          ],
+        },
+        order: { type: 'string', enum: ['asc', 'desc'] },
+        limit: { type: 'integer', description: '最大件数（1〜10）' },
+        min_reviews: { type: 'integer', description: '最低レビュー数（0以上）' },
+        sample_reviews: {
+          type: 'integer',
+          description: '科目ごとのレビュー例数（1〜3）',
+        },
+      },
+      required: ['university_id', 'metric', 'order', 'limit', 'min_reviews', 'sample_reviews'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /** ---------- tool実装（Supabaseで安全に実行） ---------- */
@@ -491,6 +524,71 @@ async function tool_top_subjects_by_metric(args: {
   }));
 }
 
+async function tool_top_subjects_with_examples(args: {
+  university_id: string;
+  metric:
+    | 'avg_satisfaction'
+    | 'avg_recommendation'
+    | 'avg_class_difficulty'
+    | 'avg_assignment_load'
+    | 'avg_attendance_strictness'
+    | 'avg_credit_ease';
+  order: 'asc' | 'desc';
+  limit: number;
+  min_reviews: number;
+  sample_reviews: number;
+}) {
+  const universityId = args.university_id;
+  const limit = Math.max(1, Math.min(10, args.limit || 5));
+  const minReviews = Math.max(0, args.min_reviews || 0);
+  const sampleCount = Math.max(1, Math.min(3, args.sample_reviews || 1));
+
+  if (!universityId) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from('subject_rollups')
+    .select(`subject_id,review_count,${args.metric},subjects(name,university_id)`)
+    .gte('review_count', minReviews)
+    .order(args.metric, { ascending: args.order === 'asc', nullsFirst: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  const filtered = (data || []).filter((r: any) => r.subjects?.university_id === universityId);
+  const results = [];
+
+  for (const r of filtered) {
+    const subjectId = r.subject_id as string;
+    const { data: reviews, error: revErr } = await supabaseAdmin
+      .from('course_reviews')
+      .select('body_main,satisfaction,recommendation,created_at')
+      .eq('subject_id', subjectId)
+      .gte('satisfaction', 4)
+      .gte('recommendation', 4)
+      .order('created_at', { ascending: false })
+      .limit(sampleCount);
+
+    if (revErr) throw revErr;
+
+    const subjectName = (r as any)?.subjects?.name ?? null;
+    const metricValue = (r as Record<string, unknown>)[args.metric] ?? null;
+    results.push({
+      subject_id: subjectId,
+      subject_name: subjectName,
+      review_count: r.review_count,
+      metric_value: metricValue,
+      metric: args.metric,
+      examples: (reviews || []).map((x: any) => ({
+        body_main: x.body_main,
+        satisfaction: x.satisfaction,
+        recommendation: x.recommendation,
+      })),
+    });
+  }
+
+  return results;
+}
+
 /** tool名→実装 のルーター */
 async function callTool(name: string, args: any, ctx: { userId: string }) {
   switch (name) {
@@ -504,6 +602,8 @@ async function callTool(name: string, args: any, ctx: { userId: string }) {
       return await tool_get_subject_rollup(args);
     case 'top_subjects_by_metric':
       return await tool_top_subjects_by_metric(args);
+    case 'top_subjects_with_examples':
+      return await tool_top_subjects_with_examples(args);
     default:
       throw new Error(`unknown tool: ${name}`);
   }
@@ -551,6 +651,7 @@ async function runAgent(params: { userMessage: string; userId: string; debug?: b
 - 大学名が書かれている場合は resolve_university で候補を確定する。
 - 科目が曖昧なら search_subjects_by_name で候補を出してユーザーに選ばせる。
 - 「おすすめ上位」「難しい上位」などランキング系は top_subjects_by_metric を使う。
+- コメント例も添えたい場合は top_subjects_with_examples を使う。
 - 個別科目の詳細は get_subject_rollup を使う。
 - rollup が無い / is_dirty=true / summaryが空などは「集計中/データ不足」を正直に伝える。
 - 回答には可能なら review_count と主要な平均値（満足度/おすすめ度/難易度）を添える。
