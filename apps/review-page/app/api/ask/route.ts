@@ -115,6 +115,8 @@ const PROMPT_DEVELOPER = `
    -> top_subjects_with_examples または rollup の要約を使い、短い引用を2〜3件。
 7) 大学が曖昧（例: 「うちの大学で」）
    -> get_my_affiliation で大学が一意なら使用。不明なら大学名を質問。
+8) 科目一覧（例: 「○○大学ってどんな科目がある？」）
+   -> resolve_university + list_subjects_by_university で科目名を列挙（上限あり）。
 
 【出力の雰囲気】
 - LINE想定。長文になりすぎない。必要なら箇条書き。
@@ -175,6 +177,9 @@ function shouldForceTool(userMessage: string) {
     '人気',
     '評判',
     'レビュー例',
+    '一覧',
+    '科目一覧',
+    'どんな科目',
     'rollup',
     'summary',
   ];
@@ -276,6 +281,21 @@ const tools: OpenAI.Responses.Tool[] = [
         limit: { type: 'integer', description: '最大件数（1〜20）' },
       },
       required: ['university_id', 'keyword', 'limit'],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function',
+    name: 'list_subjects_by_university',
+    description: '指定大学の subjects を一覧で返す（科目一覧の問い合わせ用）。',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        university_id: { type: 'string', description: 'universities.id (uuid)' },
+        limit: { type: 'integer', description: '最大件数（1〜50）' },
+      },
+      required: ['university_id', 'limit'],
       additionalProperties: false,
     },
   },
@@ -422,6 +442,23 @@ async function tool_search_subjects_by_name(args: { university_id: string; keywo
 
   if (error) throw error;
 
+  return (data || []) as SubjectHit[];
+}
+
+async function tool_list_subjects_by_university(args: { university_id: string; limit: number }) {
+  const universityId = args.university_id;
+  const limit = Math.max(1, Math.min(50, args.limit || 20));
+
+  if (!universityId) return [] as SubjectHit[];
+
+  const { data, error } = await supabaseAdmin
+    .from('subjects')
+    .select('id,name,university_id')
+    .eq('university_id', universityId)
+    .order('name', { ascending: true })
+    .limit(limit);
+
+  if (error) throw error;
   return (data || []) as SubjectHit[];
 }
 
@@ -631,6 +668,8 @@ async function callTool(name: string, args: any, ctx: { userId: string }) {
       return await tool_resolve_university(args);
     case 'search_subjects_by_name':
       return await tool_search_subjects_by_name(args);
+    case 'list_subjects_by_university':
+      return await tool_list_subjects_by_university(args);
     case 'get_subject_rollup':
       return await tool_get_subject_rollup(args);
     case 'top_subjects_by_metric':
