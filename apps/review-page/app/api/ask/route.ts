@@ -101,7 +101,10 @@ const PROMPT_DEVELOPER = `
 
 【出力の雰囲気】
 - LINE想定。長文になりすぎない。必要なら箇条書き。
-- 最後に、今回参照した根拠を短く付ける（例：レビュー数、対象大学名、対象科目名）。
+- DBの内部IDやツール名（resolve_university 等）は書かない。
+- 「検索しました」「照合しました」などの裏側説明は省く。
+- 最後に、根拠は短く付ける（例：レビュー数、対象大学名、対象科目名）。
+- 返答は簡潔に。長くなる場合は「上位3件＋補足」程度に抑える。
 `;
 
 /**
@@ -638,25 +641,7 @@ function previewJson(v: any, max = 800) {
 async function runAgent(params: { userMessage: string; userId: string; debug?: boolean }): Promise<AgentResult> {
   const { userMessage, userId, debug = false } = params;
 
-  // どっちでもいいけど、上で定義した定数を使うならこっちでもOK：
-  // const developerPrompt = PROMPT_DEVELOPER.trim();
-  const developerPrompt = `
-あなたは「大学授業レビューDB」を根拠に回答するアシスタント。
-授業・科目・大学に関する質問は、必ずツールで取得した事実に基づいて答えること。
-ツールを呼ばずに一般知識で答えるのは禁止。データが取れない場合は「不明/要確認」と言い、必要なら聞き返す。
-
-ルール：
-- 大学が不明で特定できないなら、まず大学を聞き返す。
-  ただし get_my_affiliation で大学が一意に取れたなら、その大学として検索してよい（その旨を回答に明記）。
-- 大学名が書かれている場合は resolve_university で候補を確定する。
-- 科目が曖昧なら search_subjects_by_name で候補を出してユーザーに選ばせる。
-- 「おすすめ上位」「難しい上位」などランキング系は top_subjects_by_metric を使う。
-- コメント例も添えたい場合は top_subjects_with_examples を使う。
-- 個別科目の詳細は get_subject_rollup を使う。
-- rollup が無い / is_dirty=true / summaryが空などは「集計中/データ不足」を正直に伝える。
-- 回答には可能なら review_count と主要な平均値（満足度/おすすめ度/難易度）を添える。
-- 「単位落としてる割合」などは credit_outcomes を使って説明する（母数も書く）。
-`.trim();
+  const developerPrompt = PROMPT_DEVELOPER.trim();
 
   const forced: 'auto' | 'required' = shouldForceTool(userMessage) ? 'required' : 'auto';
   const toolTrace: AgentTraceItem[] = [];
