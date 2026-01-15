@@ -383,6 +383,46 @@ export default function ReviewFormPage() {
     setSubmitSuccess('');
 
     try {
+      let moderationResult: {
+        ai_flagged: boolean;
+        severity: number | null;
+        reason: string;
+        raw_json: Record<string, unknown>;
+      } | null = null;
+
+      {
+        const moderationRes = await fetch('/api/review-moderation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment: form.comment.trim() }),
+        });
+
+        const moderationJson = await moderationRes.json().catch(() => ({}));
+
+        if (!moderationRes.ok || !moderationJson?.ok) {
+          throw new Error(
+            typeof moderationJson?.error === 'string'
+              ? moderationJson.error
+              : 'コメントの判定に失敗しました。もう一度お試しください。'
+          );
+        }
+
+        moderationResult = moderationJson.result ?? null;
+
+        if (moderationResult?.ai_flagged) {
+          const confirmSend = window.confirm(
+            `不適切なコメントの可能性があります。\n` +
+              `このまま送信しますか？\n` +
+              `（送信すると記録されます）`
+          );
+
+          if (!confirmSend) {
+            setSubmitError(moderationResult.reason || 'コメントを修正してください。');
+            return;
+          }
+        }
+      }
+
       // LINE userId が取れてないと、サーバ側で users.id を作れない
       if (!lineUserId) {
         throw new Error('LINEユーザー情報を取得できていません（LIFF未初期化 or 開発用ID未設定）');
@@ -411,6 +451,14 @@ export default function ReviewFormPage() {
         ...form.ratings,
 
         body_main: form.comment.trim(),
+
+        ...(moderationResult?.ai_flagged
+          ? {
+              ai_flagged: true,
+              ai_severity: moderationResult.severity,
+              ai_raw_json: moderationResult.raw_json,
+            }
+          : {}),
       };
 
       const res = await fetch('/api/course-reviews', {
