@@ -570,9 +570,10 @@ async function tool_top_subjects_with_examples(args: {
 
     if (revErr) throw revErr;
 
+    const subjectName = (r as any)?.subjects?.name ?? null;
     results.push({
       subject_id: subjectId,
-      subject_name: r.subjects?.name ?? null,
+      subject_name: subjectName,
       review_count: r.review_count,
       metric_value: r[args.metric] ?? null,
       metric: args.metric,
