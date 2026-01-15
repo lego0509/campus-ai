@@ -98,6 +98,23 @@ const PROMPT_DEVELOPER = `
 - rollup が存在しない / is_dirty=true / summaryが空などの場合は「集計中/データ不足」を正直に伝える。
 - 回答には可能なら review_count と主要な平均値（満足度/おすすめ度/難易度）を添える。
 - 「単位落としてる割合」などは credit_outcomes を使って説明する（母数も書く）。
+- toolの連続呼び出しは最大2回までで完結させる。条件が揃わない場合は聞き返す。
+
+【質問パターンと推奨ツール】
+1) ランキング/おすすめ系（例: おすすめ授業, 人気授業, ランキング）
+   -> resolve_university + top_subjects_by_metric を使う（top3〜5件）。
+2) 難易度/楽単/きつい系（例: 難しい, きつい, 楽, 単位取りやすい）
+   -> top_subjects_by_metric（指標: 難易度/単位の容易さ）。
+3) 個別科目の評価（例: 「統計学基礎ってどう？」）
+   -> search_subjects_by_name -> get_subject_rollup。
+4) 科目比較（例: AとBどっちが難しい？）
+   -> 両科目を特定して get_subject_rollup で比較。
+5) 単位落とす/出席/課題量（例: 落単率, 出席厳しい？）
+   -> credit_outcomes または rollup の該当指標を提示。
+6) レビュー引用（例: レビューの例を出して）
+   -> top_subjects_with_examples または rollup の要約を使い、短い引用を2〜3件。
+7) 大学が曖昧（例: 「うちの大学で」）
+   -> get_my_affiliation で大学が一意なら使用。不明なら大学名を質問。
 
 【出力の雰囲気】
 - LINE想定。長文になりすぎない。必要なら箇条書き。
@@ -147,6 +164,17 @@ function shouldForceTool(userMessage: string) {
     'トップ',
     'ランキング',
     '平均',
+    '楽',
+    'きつ',
+    '比較',
+    'どっち',
+    'どちら',
+    '率',
+    '多い',
+    '少ない',
+    '人気',
+    '評判',
+    'レビュー例',
     'rollup',
     'summary',
   ];
