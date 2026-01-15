@@ -95,7 +95,7 @@ export default function ReviewFormPage() {
     ) : null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>('');
-  const [submitSuccess, setSubmitSuccess] = useState<string>('');
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
 
   // LIFFから取れるLINEの生userId（DBには保存しない）
   const [lineUserId, setLineUserId] = useState<string>('');
@@ -106,7 +106,6 @@ export default function ReviewFormPage() {
    * - 画面上の表示はこれに寄せる（デバッグや照合が楽）
    */
   const [systemUserId, setSystemUserId] = useState<string>('');
-  const [systemUserError, setSystemUserError] = useState<string>('');
 
   // フォーム本体
   const [form, setForm] = useState({
@@ -191,7 +190,6 @@ export default function ReviewFormPage() {
       // lineUserIdが無いと解決できない
       if (!lineUserId) return;
 
-      setSystemUserError('');
       setSystemUserId('');
 
       try {
@@ -214,8 +212,8 @@ export default function ReviewFormPage() {
         }
 
         if (!canceled) setSystemUserId(String(json.user_id ?? ''));
-      } catch (e: any) {
-        if (!canceled) setSystemUserError(e?.message ?? 'ユーザーID解決でエラーが発生しました');
+      } catch {
+        // 表示は出さない（背景で失敗しても入力は続けられるようにする）
       }
     };
 
@@ -386,7 +384,7 @@ export default function ReviewFormPage() {
 
     setIsSubmitting(true);
     setSubmitError('');
-    setSubmitSuccess('');
+    setShowSubmitModal(false);
 
     try {
       let moderationResult: {
@@ -493,7 +491,23 @@ export default function ReviewFormPage() {
         throw new Error(`${baseMsg}${detailMsg}`);
       }
 
-      setSubmitSuccess(`投稿しました！ review_id: ${json.review_id ?? ''}`);
+      setForm((prev) => ({
+        ...prev,
+        courseName: '',
+        teacherNames: [''],
+        academicYear: new Date().getFullYear(),
+        term: '',
+        creditsAtTake: '',
+        requirementTypeAtTake: '',
+        performanceSelf: 0,
+        assignmentDifficulty4: 0,
+        ratings: assessmentOptions.reduce(
+          (acc, curr) => ({ ...acc, [curr.key]: 0 }),
+          {} as Record<RatingKey, number>
+        ),
+        comment: '',
+      }));
+      setShowSubmitModal(true);
     } catch (e: any) {
       setSubmitError(e?.message ?? '送信処理でエラーが発生しました');
     } finally {
@@ -506,44 +520,11 @@ export default function ReviewFormPage() {
       <div className="w-full max-w-xl space-y-4 rounded-2xl bg-white/80 p-4 shadow-soft backdrop-blur-sm">
         <header className="space-y-1">
           <p className="text-lg font-bold text-gray-900">授業レビュー投稿</p>
-          <p className="text-sm text-gray-600">スマホで入力しやすいフォームに最適化しています</p>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="badge-soft">レビュー投稿フォーム</span>
-            <span>必須項目は「必須」ラベルが付きます</span>
-          </div>
-
-          {/* デバッグ表示：このシステムで使うユーザーID（users.id） */}
-          <div className="mt-2 text-xs text-gray-700">
-            <span className="font-semibold">User ID</span>：
-            {systemUserId ? (
-              <span className="ml-1 font-mono">{systemUserId}</span>
-            ) : (
-              <span className="ml-1 text-gray-500">未取得</span>
-            )}
-          </div>
-
-          {/* 失敗したらここに出す */}
-          {systemUserError ? (
-            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              users.id の解決に失敗：{systemUserError}
-            </div>
-          ) : null}
-
-          {/* LINE生IDは一応残す（開発のときだけ見たいならここをdevelopment限定にしてOK） */}
-          <div className="mt-1 text-[11px] text-gray-500">
-            <span className="font-semibold">LINE user</span>：{lineUserId ? lineUserId : '未取得'}
-          </div>
         </header>
 
         {liffError ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             LIFF: {liffError}
-          </div>
-        ) : null}
-
-        {submitSuccess ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {submitSuccess}
           </div>
         ) : null}
 
@@ -852,6 +833,21 @@ export default function ReviewFormPage() {
           </div>
         </div>
       </div>
+      {showSubmitModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center shadow-xl">
+            <p className="text-base font-semibold text-gray-900">投稿しました！</p>
+            <p className="mt-2 text-sm text-gray-600">ご協力ありがとうございます。</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => setShowSubmitModal(false)}
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
