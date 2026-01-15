@@ -87,9 +87,15 @@ function buildAcademicYearOptions() {
 const academicYearOptions = buildAcademicYearOptions();
 
 export default function ReviewFormPage() {
+  const requiredBadge = (show: boolean) =>
+    show ? (
+      <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">
+        必須
+      </span>
+    ) : null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>('');
-  const [submitSuccess, setSubmitSuccess] = useState<string>('');
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
 
   // LIFFから取れるLINEの生userId（DBには保存しない）
   const [lineUserId, setLineUserId] = useState<string>('');
@@ -100,7 +106,6 @@ export default function ReviewFormPage() {
    * - 画面上の表示はこれに寄せる（デバッグや照合が楽）
    */
   const [systemUserId, setSystemUserId] = useState<string>('');
-  const [systemUserError, setSystemUserError] = useState<string>('');
 
   // フォーム本体
   const [form, setForm] = useState({
@@ -117,7 +122,7 @@ export default function ReviewFormPage() {
     // 受講情報
     academicYear: new Date().getFullYear(), // 必須（デフォルト今年）
     term: '', // 必須（s1/s2/q1..）
-    creditsAtTake: '', // 任意（文字列で保持してバリデーション）
+    creditsAtTake: '', // 必須（文字列で保持してバリデーション）
     requirementTypeAtTake: '', // 必須（required/elective/unknown）
 
     // 4段階
@@ -185,7 +190,6 @@ export default function ReviewFormPage() {
       // lineUserIdが無いと解決できない
       if (!lineUserId) return;
 
-      setSystemUserError('');
       setSystemUserId('');
 
       try {
@@ -208,8 +212,8 @@ export default function ReviewFormPage() {
         }
 
         if (!canceled) setSystemUserId(String(json.user_id ?? ''));
-      } catch (e: any) {
-        if (!canceled) setSystemUserError(e?.message ?? 'ユーザーID解決でエラーが発生しました');
+      } catch {
+        // 表示は出さない（背景で失敗しても入力は続けられるようにする）
       }
     };
 
@@ -335,6 +339,8 @@ export default function ReviewFormPage() {
     return n;
   }, [form.creditsAtTake]);
 
+  const isCreditsValid = Number.isFinite(creditsValue) && creditsValue !== null && creditsValue > 0;
+
   // ----------------------------
   // フォームの妥当性チェック（送信ボタンの活性/非活性）
   // ----------------------------
@@ -361,10 +367,8 @@ export default function ReviewFormPage() {
     // コメント長：コードポイント数で判定（絵文字対策）
     if (charLen(form.comment.trim()) < MIN_COMMENT_LENGTH) return false;
 
-    // 単位数：任意だが入力されているなら正の整数
-    if (creditsValue !== null) {
-      if (!Number.isFinite(creditsValue) || creditsValue <= 0) return false;
-    }
+    // 単位数：必須
+    if (!Number.isFinite(creditsValue) || creditsValue === null || creditsValue <= 0) return false;
 
     // 年度：範囲チェック
     if (form.academicYear < 1990 || form.academicYear > 2100) return false;
@@ -380,9 +384,49 @@ export default function ReviewFormPage() {
 
     setIsSubmitting(true);
     setSubmitError('');
-    setSubmitSuccess('');
+    setShowSubmitModal(false);
 
     try {
+      let moderationResult: {
+        ai_flagged: boolean;
+        severity: number | null;
+        reason: string;
+        raw_json: Record<string, unknown>;
+      } | null = null;
+
+      {
+        const moderationRes = await fetch('/api/review-moderation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment: form.comment.trim() }),
+        });
+
+        const moderationJson = await moderationRes.json().catch(() => ({}));
+
+        if (!moderationRes.ok || !moderationJson?.ok) {
+          throw new Error(
+            typeof moderationJson?.error === 'string'
+              ? moderationJson.error
+              : 'コメントの判定に失敗しました。もう一度お試しください。'
+          );
+        }
+
+        moderationResult = moderationJson.result ?? null;
+
+        if (moderationResult?.ai_flagged) {
+          const confirmSend = window.confirm(
+            `不適切なコメントの可能性があります。\n` +
+              `このまま送信しますか？\n` +
+              `（送信すると記録されます）`
+          );
+
+          if (!confirmSend) {
+            setSubmitError(moderationResult.reason || 'コメントを修正してください。');
+            return;
+          }
+        }
+      }
+
       // LINE userId が取れてないと、サーバ側で users.id を作れない
       if (!lineUserId) {
         throw new Error('LINEユーザー情報を取得できていません（LIFF未初期化 or 開発用ID未設定）');
@@ -411,6 +455,14 @@ export default function ReviewFormPage() {
         ...form.ratings,
 
         body_main: form.comment.trim(),
+
+        ...(moderationResult?.ai_flagged
+          ? {
+              ai_flagged: true,
+              ai_severity: moderationResult.severity,
+              ai_raw_json: moderationResult.raw_json,
+            }
+          : {}),
       };
 
       const res = await fetch('/api/course-reviews', {
@@ -439,7 +491,23 @@ export default function ReviewFormPage() {
         throw new Error(`${baseMsg}${detailMsg}`);
       }
 
-      setSubmitSuccess(`投稿しました！ review_id: ${json.review_id ?? ''}`);
+      setForm((prev) => ({
+        ...prev,
+        courseName: '',
+        teacherNames: [''],
+        academicYear: new Date().getFullYear(),
+        term: '',
+        creditsAtTake: '',
+        requirementTypeAtTake: '',
+        performanceSelf: 0,
+        assignmentDifficulty4: 0,
+        ratings: assessmentOptions.reduce(
+          (acc, curr) => ({ ...acc, [curr.key]: 0 }),
+          {} as Record<RatingKey, number>
+        ),
+        comment: '',
+      }));
+      setShowSubmitModal(true);
     } catch (e: any) {
       setSubmitError(e?.message ?? '送信処理でエラーが発生しました');
     } finally {
@@ -452,33 +520,6 @@ export default function ReviewFormPage() {
       <div className="w-full max-w-xl space-y-4 rounded-2xl bg-white/80 p-4 shadow-soft backdrop-blur-sm">
         <header className="space-y-1">
           <p className="text-lg font-bold text-gray-900">授業レビュー投稿</p>
-          <p className="text-sm text-gray-600">スマホで入力しやすいフォームに最適化しています</p>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="badge-soft">レビュー投稿フォーム</span>
-            <span>必須項目は「＊」が付いています</span>
-          </div>
-
-          {/* デバッグ表示：このシステムで使うユーザーID（users.id） */}
-          <div className="mt-2 text-xs text-gray-700">
-            <span className="font-semibold">User ID</span>：
-            {systemUserId ? (
-              <span className="ml-1 font-mono">{systemUserId}</span>
-            ) : (
-              <span className="ml-1 text-gray-500">未取得</span>
-            )}
-          </div>
-
-          {/* 失敗したらここに出す */}
-          {systemUserError ? (
-            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              users.id の解決に失敗：{systemUserError}
-            </div>
-          ) : null}
-
-          {/* LINE生IDは一応残す（開発のときだけ見たいならここをdevelopment限定にしてOK） */}
-          <div className="mt-1 text-[11px] text-gray-500">
-            <span className="font-semibold">LINE user</span>：{lineUserId ? lineUserId : '未取得'}
-          </div>
         </header>
 
         {liffError ? (
@@ -487,23 +528,13 @@ export default function ReviewFormPage() {
           </div>
         ) : null}
 
-        {submitError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {submitError}
-          </div>
-        ) : null}
-        {submitSuccess ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {submitSuccess}
-          </div>
-        ) : null}
-
         <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <SectionCard title="ユーザー情報" subtitle="大学・学部・学年（受講時点）を入力してください">
             <div className="grid gap-4">
               <div className="field-wrapper">
                 <label className="label" htmlFor="university">
-                  大学名＊
+                  大学名
+                  {requiredBadge(form.university.trim().length === 0)}
                 </label>
                 <input
                   id="university"
@@ -517,7 +548,8 @@ export default function ReviewFormPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="field-wrapper">
                   <label className="label" htmlFor="faculty">
-                    学部名＊
+                    学部名
+                    {requiredBadge(form.faculty.trim().length === 0)}
                   </label>
                   <input
                     id="faculty"
@@ -544,7 +576,8 @@ export default function ReviewFormPage() {
 
               <div className="field-wrapper sm:max-w-xs">
                 <label className="label" htmlFor="gradeAtTake">
-                  学年＊
+                  学年
+                  {requiredBadge(form.gradeAtTake === 0)}
                 </label>
                 <select
                   id="gradeAtTake"
@@ -567,7 +600,8 @@ export default function ReviewFormPage() {
             <div className="grid gap-4">
               <div className="field-wrapper">
                 <label className="label" htmlFor="courseName">
-                  科目名＊
+                  科目名
+                  {requiredBadge(form.courseName.trim().length === 0)}
                 </label>
                 <input
                   id="courseName"
@@ -624,7 +658,8 @@ export default function ReviewFormPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="field-wrapper">
                 <label className="label" htmlFor="academicYear">
-                  受講年度＊
+                  受講年度
+                  {requiredBadge(Number.isNaN(form.academicYear))}
                 </label>
                 <select
                   id="academicYear"
@@ -642,7 +677,8 @@ export default function ReviewFormPage() {
 
               <div className="field-wrapper">
                 <label className="label" htmlFor="term">
-                  学期＊
+                  学期
+                  {requiredBadge(form.term.trim().length === 0)}
                 </label>
                 <select
                   id="term"
@@ -662,6 +698,7 @@ export default function ReviewFormPage() {
               <div className="field-wrapper">
                 <label className="label" htmlFor="creditsAtTake">
                   単位数
+                  {requiredBadge(!isCreditsValid)}
                 </label>
                 <input
                   id="creditsAtTake"
@@ -671,12 +708,13 @@ export default function ReviewFormPage() {
                   value={form.creditsAtTake}
                   onChange={(e) => handleTextChange('creditsAtTake', e.target.value)}
                 />
-                <p className="mt-1 text-xs text-gray-500">空欄OK。入力する場合は正の整数</p>
+                <p className="mt-1 text-xs text-gray-500">正の整数で入力してください</p>
               </div>
 
               <div className="field-wrapper">
                 <label className="label" htmlFor="requirementTypeAtTake">
-                  必修/選択＊
+                  必修/選択
+                  {requiredBadge(form.requirementTypeAtTake.trim().length === 0)}
                 </label>
                 <select
                   id="requirementTypeAtTake"
@@ -698,7 +736,10 @@ export default function ReviewFormPage() {
           <SectionCard title="成績・課題難易度" subtitle="短い選択項目をまとめています（必須）">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 text-sm text-gray-700">
-                <p className="label">成績＊</p>
+                <p className="label">
+                  成績
+                  {requiredBadge(form.performanceSelf === 0)}
+                </p>
                 {performanceOptions.map((opt) => (
                   <label key={opt.value} className="flex items-center gap-2">
                     <input
@@ -715,7 +756,10 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="space-y-2 text-sm text-gray-700">
-                <p className="label">課題の難易度＊</p>
+                <p className="label">
+                  課題の難易度
+                  {requiredBadge(form.assignmentDifficulty4 === 0)}
+                </p>
                 {assignmentDifficultyOptions.map((opt) => (
                   <label key={opt.value} className="flex items-center gap-2">
                     <input
@@ -739,19 +783,30 @@ export default function ReviewFormPage() {
           >
             <div className="grid gap-4 sm:grid-cols-2">
               {assessmentOptions.map((item) => (
-                <StarRating
-                  key={item.key}
-                  label={`${item.label}＊`}
-                  value={form.ratings[item.key]}
-                  onChange={(val) => updateRating(item.key, val)}
-                />
+                  <StarRating
+                    key={item.key}
+                    label={item.label}
+                    value={form.ratings[item.key]}
+                    onChange={(val) => updateRating(item.key, val)}
+                    required
+                  />
               ))}
             </div>
           </SectionCard>
 
           <SectionCard title="コメント" subtitle="30文字以上でご記入ください（教材・形式・テスト方式などもここに）">
+            {submitError ? (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            ) : null}
             <TextCounterTextarea
-              label="コメント"
+              label={
+                <span className="flex items-center">
+                  コメント
+                  {requiredBadge(charLen(form.comment.trim()) < MIN_COMMENT_LENGTH)}
+                </span>
+              }
               value={form.comment}
               onChange={(val) => handleTextChange('comment', val)}
               minLength={MIN_COMMENT_LENGTH}
@@ -778,6 +833,21 @@ export default function ReviewFormPage() {
           </div>
         </div>
       </div>
+      {showSubmitModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center shadow-xl">
+            <p className="text-base font-semibold text-gray-900">投稿しました！</p>
+            <p className="mt-2 text-sm text-gray-600">ご協力ありがとうございます。</p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => setShowSubmitModal(false)}
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
