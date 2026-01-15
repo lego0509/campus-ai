@@ -54,8 +54,8 @@ type Payload = {
   recommendation: number; // 1..5
 
   /**
-   * 本文：DBでは course_review_bodies に分離
-   * - 30文字以上制約は bodies 側で担保
+   * 本文：course_reviews.body_main に保存
+   * - 30文字以上制約は DB 側で担保
    */
   body_main: string;
 };
@@ -283,11 +283,10 @@ export async function POST(req: Request) {
     const subjectId = await getOrCreateSubjectId(universityId, subjectName);
 
     // ----------------------------
-    // 5) course_reviews（本文以外）を insert
+    // 5) course_reviews（本文含む）を insert
     // ----------------------------
     // 重要：
     // - course_reviews に university_id はもう無い（subject経由で取る）
-    // - body_main は course_review_bodies に分離済み
     const { data: inserted, error: insReviewErr } = await supabaseAdmin
       .from('course_reviews')
       .insert({
@@ -315,6 +314,7 @@ export async function POST(req: Request) {
         attendance_strictness: body.attendance_strictness,
         satisfaction: body.satisfaction,
         recommendation: body.recommendation,
+        body_main: comment,
       })
       .select('id')
       .single();
@@ -329,30 +329,7 @@ export async function POST(req: Request) {
     insertedReviewId = inserted.id;
 
     // ----------------------------
-    // 6) course_review_bodies（本文）を insert
-    // ----------------------------
-    // ここが失敗したら「本文なしレビュー」が残るので、必ず後始末する
-    {
-      const { error: bodyErr } = await supabaseAdmin.from('course_review_bodies').insert({
-        review_id: insertedReviewId,
-        body_main: comment,
-      });
-
-      if (bodyErr) {
-        // 片肺データ防止：本体レビューを消す（bodiesはinsert失敗してるので存在しない）
-        await supabaseAdmin.from('course_reviews').delete().eq('id', insertedReviewId);
-        insertedReviewId = null;
-        console.error('[course_review_bodies insert error]', bodyErr);
-
-        return NextResponse.json(
-          { error: 'failed to insert course_review_bodies', details: supabaseErrorToJson(bodyErr) },
-          { status: 400 }
-        );
-      }
-    }
-
-    // ----------------------------
-    // 7) embedding_jobs を queued で積む
+    // 6) embedding_jobs を queued で積む
     // ----------------------------
     // バッチ処理は「jobsを見て処理する」想定にすると運用が楽。
     // - 未処理レビュー探索が確実
@@ -386,7 +363,7 @@ export async function POST(req: Request) {
     }
 
     // ----------------------------
-    // 8) subject_rollups を dirty にする
+    // 7) subject_rollups を dirty にする
     // ----------------------------
     // 投稿時点では集計・要約は更新しない（遅い/失敗がUX悪化）
     // バッチが is_dirty=true を拾って集計(avg/count/summary)を更新する
