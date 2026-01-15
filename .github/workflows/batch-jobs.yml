@@ -1,0 +1,35 @@
+name: Run batch jobs
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve base URL
+        run: echo "REVIEW_BASE_URL=${REVIEW_BASE_URL:-https://campus-ai-eight.vercel.app}" >> "$GITHUB_ENV"
+        env:
+          REVIEW_BASE_URL: ${{ vars.REVIEW_BASE_URL }}
+      - name: Run embeddings batch
+        run: |
+          curl -sS -X POST "$REVIEW_BASE_URL/api/batch/embeddings/run" \
+            -H "x-batch-token: $BATCH_TOKEN" \
+            -H "x-batch-runner: github-actions" \
+            -H "content-type: application/json" \
+            --data '{}' \
+            --fail
+        env:
+          BATCH_TOKEN: ${{ secrets.BATCH_TOKEN }}
+      - name: Run rollups batch
+        run: |
+          curl -sS -X POST "$REVIEW_BASE_URL/api/batch/rollups/run" \
+            -H "x-batch-token: $BATCH_TOKEN" \
+            -H "x-batch-runner: github-actions" \
+            -H "content-type: application/json" \
+            --data '{}' \
+            --fail
+        env:
+          BATCH_TOKEN: ${{ secrets.BATCH_TOKEN }}
