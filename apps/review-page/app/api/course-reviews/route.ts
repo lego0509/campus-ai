@@ -58,6 +58,13 @@ type Payload = {
    * - 30文字以上制約は DB 側で担保
    */
   body_main: string;
+
+  /**
+   * コメントのAI判定結果（警告表示後に「送信する」を選んだ場合のみ）
+   */
+  ai_flagged?: boolean;
+  ai_severity?: number | null;
+  ai_raw_json?: Record<string, unknown> | null;
 };
 
 /**
@@ -329,7 +336,31 @@ export async function POST(req: Request) {
     insertedReviewId = inserted.id;
 
     // ----------------------------
-    // 6) embedding_jobs を queued で積む
+    // 6) course_review_ai_flags（任意）
+    // ----------------------------
+    if (body.ai_flagged === true) {
+      const { error: flagErr } = await supabaseAdmin
+        .from('course_review_ai_flags')
+        .insert({
+          review_id: insertedReviewId,
+          ai_flagged: true,
+          severity: body.ai_severity ?? null,
+          raw_json: body.ai_raw_json ?? null,
+        });
+
+      if (flagErr) {
+        await supabaseAdmin.from('course_reviews').delete().eq('id', insertedReviewId);
+        insertedReviewId = null;
+
+        return NextResponse.json(
+          { error: 'failed to insert course_review_ai_flags', details: supabaseErrorToJson(flagErr) },
+          { status: 500 }
+        );
+      }
+    }
+
+    // ----------------------------
+    // 7) embedding_jobs を queued で積む
     // ----------------------------
     // バッチ処理は「jobsを見て処理する」想定にすると運用が楽。
     // - 未処理レビュー探索が確実
@@ -363,7 +394,7 @@ export async function POST(req: Request) {
     }
 
     // ----------------------------
-    // 7) subject_rollups を dirty にする
+    // 8) subject_rollups を dirty にする
     // ----------------------------
     // 投稿時点では集計・要約は更新しない（遅い/失敗がUX悪化）
     // バッチが is_dirty=true を拾って集計(avg/count/summary)を更新する
