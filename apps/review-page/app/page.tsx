@@ -535,11 +535,6 @@ export default function ReviewFormPage() {
           </div>
         ) : null}
 
-        {submitError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {submitError}
-          </div>
-        ) : null}
         {submitSuccess ? (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {submitSuccess}
@@ -798,6 +793,11 @@ export default function ReviewFormPage() {
           </SectionCard>
 
           <SectionCard title="コメント" subtitle="30文字以上でご記入ください（教材・形式・テスト方式などもここに）">
+            {submitError ? (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {submitError}
+              </div>
+            ) : null}
             <TextCounterTextarea
               label="コメント"
               value={form.comment}
