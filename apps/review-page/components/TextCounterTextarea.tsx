@@ -36,7 +36,7 @@ export function TextCounterTextarea({
         {...props}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="control min-h-[120px] resize-none"
+        className="control min-h-[144px] resize-none"
       />
       <div className="flex items-center justify-between text-xs">
         <span className={clsx('font-semibold', isShort ? 'text-red-500' : 'text-gray-500')}>

@@ -20,15 +20,15 @@ export function StarRating({ label, value, onChange, note, required }: StarRatin
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <label className="flex items-center gap-1 text-sm font-semibold text-gray-800">
-          {label}
+        <span className="text-sm font-semibold text-gray-800">{label}</span>
+        <div className="flex items-center gap-2">
           {required && value === 0 ? (
-            <span className="ml-1 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">
+            <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">
               必須
             </span>
           ) : null}
-        </label>
-        <span className="text-xs font-semibold text-gray-500">{displayNote}</span>
+          <span className="text-xs font-semibold text-gray-500">{displayNote}</span>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {starValues.map((star) => {

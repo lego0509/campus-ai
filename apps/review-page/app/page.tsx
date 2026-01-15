@@ -87,9 +87,11 @@ function buildAcademicYearOptions() {
 const academicYearOptions = buildAcademicYearOptions();
 
 export default function ReviewFormPage() {
-  const requiredBadge = (show: boolean) =>
+  const requiredBadge = (show: boolean, className = '') =>
     show ? (
-      <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">
+      <span
+        className={`rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white ${className}`}
+      >
         必須
       </span>
     ) : null;
@@ -532,8 +534,8 @@ export default function ReviewFormPage() {
           <SectionCard title="ユーザー情報" subtitle="大学・学部・学年（受講時点）を入力してください">
             <div className="grid gap-4">
               <div className="field-wrapper">
-                <label className="label" htmlFor="university">
-                  大学名
+                <label className="label flex items-center justify-between" htmlFor="university">
+                  <span>大学名</span>
                   {requiredBadge(form.university.trim().length === 0)}
                 </label>
                 <input
@@ -547,8 +549,8 @@ export default function ReviewFormPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="field-wrapper">
-                  <label className="label" htmlFor="faculty">
-                    学部名
+                  <label className="label flex items-center justify-between" htmlFor="faculty">
+                    <span>学部名</span>
                     {requiredBadge(form.faculty.trim().length === 0)}
                   </label>
                   <input
@@ -575,8 +577,8 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="field-wrapper sm:max-w-xs">
-                <label className="label" htmlFor="gradeAtTake">
-                  学年
+                <label className="label flex items-center justify-between" htmlFor="gradeAtTake">
+                  <span>学年</span>
                   {requiredBadge(form.gradeAtTake === 0)}
                 </label>
                 <select
@@ -599,8 +601,8 @@ export default function ReviewFormPage() {
           <SectionCard title="授業情報" subtitle="科目名を入力してください（教員名は任意です）">
             <div className="grid gap-4">
               <div className="field-wrapper">
-                <label className="label" htmlFor="courseName">
-                  科目名
+                <label className="label flex items-center justify-between" htmlFor="courseName">
+                  <span>科目名</span>
                   {requiredBadge(form.courseName.trim().length === 0)}
                 </label>
                 <input
@@ -657,8 +659,8 @@ export default function ReviewFormPage() {
           <SectionCard title="受講情報" subtitle="年度・学期・必修区分などを入力してください">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="field-wrapper">
-                <label className="label" htmlFor="academicYear">
-                  受講年度
+                <label className="label flex items-center justify-between" htmlFor="academicYear">
+                  <span>受講年度</span>
                   {requiredBadge(Number.isNaN(form.academicYear))}
                 </label>
                 <select
@@ -676,8 +678,8 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="field-wrapper">
-                <label className="label" htmlFor="term">
-                  学期
+                <label className="label flex items-center justify-between" htmlFor="term">
+                  <span>学期</span>
                   {requiredBadge(form.term.trim().length === 0)}
                 </label>
                 <select
@@ -696,8 +698,8 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="field-wrapper">
-                <label className="label" htmlFor="creditsAtTake">
-                  単位数
+                <label className="label flex items-center justify-between" htmlFor="creditsAtTake">
+                  <span>単位数</span>
                   {requiredBadge(!isCreditsValid)}
                 </label>
                 <input
@@ -712,8 +714,11 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="field-wrapper">
-                <label className="label" htmlFor="requirementTypeAtTake">
-                  必修/選択
+                <label
+                  className="label flex items-center justify-between"
+                  htmlFor="requirementTypeAtTake"
+                >
+                  <span>必修/選択</span>
                   {requiredBadge(form.requirementTypeAtTake.trim().length === 0)}
                 </label>
                 <select
@@ -736,8 +741,8 @@ export default function ReviewFormPage() {
           <SectionCard title="成績・課題難易度" subtitle="短い選択項目をまとめています（必須）">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 text-sm text-gray-700">
-                <p className="label">
-                  成績
+                <p className="label flex items-center justify-between">
+                  <span>成績</span>
                   {requiredBadge(form.performanceSelf === 0)}
                 </p>
                 {performanceOptions.map((opt) => (
@@ -756,8 +761,8 @@ export default function ReviewFormPage() {
               </div>
 
               <div className="space-y-2 text-sm text-gray-700">
-                <p className="label">
-                  課題の難易度
+                <p className="label flex items-center justify-between">
+                  <span>課題の難易度</span>
                   {requiredBadge(form.assignmentDifficulty4 === 0)}
                 </p>
                 {assignmentDifficultyOptions.map((opt) => (
@@ -804,7 +809,7 @@ export default function ReviewFormPage() {
               label={
                 <span className="flex items-center">
                   コメント
-                  {requiredBadge(charLen(form.comment.trim()) < MIN_COMMENT_LENGTH)}
+                  {requiredBadge(charLen(form.comment.trim()) < MIN_COMMENT_LENGTH, 'ml-2')}
                 </span>
               }
               value={form.comment}
@@ -812,10 +817,6 @@ export default function ReviewFormPage() {
               minLength={MIN_COMMENT_LENGTH}
               placeholder="例：教材、授業形式、テスト形式、課題量、出席の厳しさなどをまとめて書いてください"
             />
-            <p className="mt-1 text-xs text-gray-500">
-              判定は「文字数」ではなく、絵文字を含む場合もズレにくいようコードポイントで数えています。
-              （目安：{charLen(form.comment.trim())}/{MIN_COMMENT_LENGTH}）
-            </p>
           </SectionCard>
 
           <div className="sticky bottom-0 left-0 right-0 z-10 -mx-4 mt-2 bg-white/95 px-4 pb-3 pt-3 backdrop-blur">
@@ -827,9 +828,6 @@ export default function ReviewFormPage() {
             >
               {isSubmitting ? '送信中...' : 'レビューを投稿する'}
             </button>
-            <p className="mt-2 text-xs text-gray-500">
-              ローカル開発では NEXT_PUBLIC_DEV_LINE_USER_ID があればそれを使います。
-            </p>
           </div>
         </div>
       </div>
