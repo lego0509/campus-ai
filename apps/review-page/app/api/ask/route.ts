@@ -571,11 +571,12 @@ async function tool_top_subjects_with_examples(args: {
     if (revErr) throw revErr;
 
     const subjectName = (r as any)?.subjects?.name ?? null;
+    const metricValue = (r as Record<string, unknown>)[args.metric] ?? null;
     results.push({
       subject_id: subjectId,
       subject_name: subjectName,
       review_count: r.review_count,
-      metric_value: r[args.metric] ?? null,
+      metric_value: metricValue,
       metric: args.metric,
       examples: (reviews || []).map((x: any) => ({
         body_main: x.body_main,
