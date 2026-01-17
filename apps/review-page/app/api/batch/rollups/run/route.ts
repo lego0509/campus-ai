@@ -14,7 +14,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * ---------------------------
  * - subject_rollups.is_dirty = true の subject を拾う
  * - course_reviews から review_count / avg_* を更新
- * - course_review_bodies から新規レビュー本文を拾って summary_1000 を更新（差分）
+ * - course_reviews から新規レビュー本文を拾って summary_1000 を更新（差分）
  * - ★追加：summary_1000 を embedding 化して subject_rollup_embeddings に差分upsert
  * - 成功したら is_dirty=false に戻す（失敗したら維持）
  *
@@ -23,7 +23,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  */
 
 // 1回の実行で処理する subject 数（最初は小さめ）
-const MAX_SUBJECTS_PER_RUN = 5;
+const MAX_SUBJECTS_PER_RUN = 30;
 
 // 集計用に読むレビュー上限（将来SQL集計へ寄せるなら要らなくなる）
 const MAX_REVIEWS_PER_SUBJECT_FOR_STATS = 5000;
@@ -131,7 +131,7 @@ type ReviewRow = {
 };
 
 type BodyRow = {
-  review_id: string;
+  id: string;
   body_main: string;
 };
 
@@ -308,18 +308,18 @@ export async function POST(req: Request) {
           newIds = newIds.slice(-MAX_NEW_REVIEWS_FOR_SUMMARY);
         }
 
-        // 3-E) 本文を取得（course_review_bodies）
+        // 3-E) 本文を取得（course_reviews）
         const bodyMap = new Map<string, string>();
         for (const ids of chunk(newIds, 200)) {
           const { data: bodies, error: bErr } = await supabaseAdmin
-            .from('course_review_bodies')
-            .select('review_id,body_main')
-            .in('review_id', ids);
+            .from('course_reviews')
+            .select('id,body_main')
+            .in('id', ids);
 
           if (bErr) throw bErr;
 
           for (const b of (bodies || []) as BodyRow[]) {
-            bodyMap.set(b.review_id, b.body_main);
+            bodyMap.set(b.id, b.body_main);
           }
         }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { TextareaHTMLAttributes, useMemo } from 'react';
+import { ReactNode, TextareaHTMLAttributes, useMemo } from 'react';
 import clsx from 'clsx';
 
 type NativeTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'value'>;
@@ -9,7 +9,7 @@ interface TextCounterTextareaProps extends NativeTextareaProps {
   value: string;
   onChange: (value: string) => void;
   minLength?: number;
-  label: string;
+  label: ReactNode;
   helper?: string;
 }
 
@@ -36,7 +36,7 @@ export function TextCounterTextarea({
         {...props}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="control min-h-[120px] resize-none"
+        className="control min-h-[144px] resize-none"
       />
       <div className="flex items-center justify-between text-xs">
         <span className={clsx('font-semibold', isShort ? 'text-red-500' : 'text-gray-500')}>
