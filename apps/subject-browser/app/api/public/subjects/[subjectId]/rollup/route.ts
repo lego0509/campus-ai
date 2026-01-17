@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
 function supabaseErrorToJson(err: any) {
   if (!err) return null;
@@ -20,6 +20,7 @@ export async function GET(
   try {
     const subjectId = params.subjectId;
 
+    const supabaseAdmin = getSupabaseAdmin();
     const { data: subject, error: subjectErr } = await supabaseAdmin
       .from('subjects')
       .select('id, name, university_id')

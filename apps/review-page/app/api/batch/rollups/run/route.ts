@@ -23,7 +23,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  */
 
 // 1回の実行で処理する subject 数（最初は小さめ）
-const MAX_SUBJECTS_PER_RUN = 5;
+const MAX_SUBJECTS_PER_RUN = 30;
 
 // 集計用に読むレビュー上限（将来SQL集計へ寄せるなら要らなくなる）
 const MAX_REVIEWS_PER_SUBJECT_FOR_STATS = 5000;

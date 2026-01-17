@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 
 function supabaseErrorToJson(err: any) {
   if (!err) return null;
@@ -23,6 +23,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'universityId is required' }, { status: 400 });
     }
 
+    const supabaseAdmin = getSupabaseAdmin();
     let builder = supabaseAdmin
       .from('subjects')
       .select('id, name, subject_rollups(review_count)')
