@@ -100,7 +100,7 @@ function getOpenAIForRollupEmbedding() {
 
 function getSummaryModel() {
   // 環境に合わせて変えてOK。未指定ならこれ。
-  return process.env.OPENAI_SUMMARY_MODEL || 'gpt-5-mini';
+  return process.env.OPENAI_SUMMARY_MODEL || 'gpt-4.1-nano';
 }
 
 function getRollupEmbeddingModel() {
