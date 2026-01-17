@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * このエンドポイントの責務
  * ---------------------------
  * - embedding_jobs の queued / failed を拾って embedding を作る
- * - course_review_bodies の本文から SHA256(content_hash) を作る
+ * - course_reviews の本文から SHA256(content_hash) を作る
  * - course_review_embeddings を upsert する（冪等）
  * - embedding_jobs を done / failed に更新し、失敗理由を残す
  *
@@ -79,7 +79,7 @@ type JobRow = {
 };
 
 type BodyRow = {
-  review_id: string;
+  id: string;
   body_main: string;
 };
 
@@ -167,19 +167,19 @@ export async function POST(req: Request) {
     const bodyMap = new Map<string, string>();
     for (const ids of chunk(reviewIds, 200)) {
       const { data: bodies, error: bodiesErr } = await supabaseAdmin
-        .from('course_review_bodies')
-        .select('review_id,body_main')
-        .in('review_id', ids);
+        .from('course_reviews')
+        .select('id,body_main')
+        .in('id', ids);
 
       if (bodiesErr) {
         return NextResponse.json(
-          { ok: false, error: 'failed to fetch course_review_bodies', details: supabaseErrorToJson(bodiesErr) },
+          { ok: false, error: 'failed to fetch course_reviews', details: supabaseErrorToJson(bodiesErr) },
           { status: 500 }
         );
       }
 
       for (const b of (bodies || []) as BodyRow[]) {
-        bodyMap.set(b.review_id, b.body_main);
+        bodyMap.set(b.id, b.body_main);
       }
     }
 
@@ -216,7 +216,7 @@ export async function POST(req: Request) {
         toFailMissingBody.push({
           review_id: j.review_id,
           attempt_count: j.attempt_count,
-          error: 'missing body_main in course_review_bodies',
+          error: 'missing body_main in course_reviews',
         });
         continue;
       }
