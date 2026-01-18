@@ -12,42 +12,39 @@ type RollupPayload = {
 };
 
 const metricLabels: Record<string, string> = {
-  review_count: '?????',
-  avg_credit_ease: '????????',
-  avg_class_difficulty: '??????',
-  avg_assignment_load: '????',
-  avg_attendance_strictness: '??????',
-  avg_satisfaction: '???',
-  avg_recommendation: '?????',
+  review_count: 'レビュー数',
+  avg_credit_ease: '単位取得の容易さ',
+  avg_class_difficulty: '授業の難易度',
+  avg_assignment_load: '課題の量',
+  avg_attendance_strictness: '出席の厳しさ',
+  avg_satisfaction: '満足度',
+  avg_recommendation: 'おすすめ度',
 };
 
 const summaryHeadings = [
-  '???',
-  '???',
-  '??',
-  '???',
-  '???',
-  '??',
-  '???',
-  '??',
-  '??',
-  '??',
-  '??????',
+  '良い点',
+  '悪い点',
+  '注意',
+  '注意点',
+  '改善点',
+  '総評',
+  'まとめ',
+  '特徴',
+  '傾向',
+  '補足',
 ];
 
 function formatMetric(value: unknown) {
-  if (value === null || value === undefined) return '?';
-  if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(2);
   return String(value);
 }
 
 function splitSummarySections(raw: string) {
-  const text = raw.replaceAll('
-', '
-').trim();
+  const text = raw.replace(/\r\n/g, '\n').trim();
   if (!text) return [];
 
-  const bracketHeadingRegex = new RegExp('[?\[]\s*([^\]?]+)\s*[?\]]', 'g');
+  const bracketHeadingRegex = /[【\[]\s*([^\]】]+)\s*[】\]]/g;
   const bracketMatches = Array.from(text.matchAll(bracketHeadingRegex));
   if (bracketMatches.length > 0) {
     const sections = bracketMatches.map((match, index) => {
@@ -61,7 +58,10 @@ function splitSummarySections(raw: string) {
     return sections.filter((section) => section.body.length > 0);
   }
 
-  const keywordHeadingRegex = new RegExp(`(?:^|\n)\s*(${summaryHeadings.join('|')})\s*[:?]`, 'g');
+  const keywordHeadingRegex = new RegExp(
+    `(?:^|\\n)\\s*(${summaryHeadings.join('|')})\\s*[:：]`,
+    'g'
+  );
   const keywordMatches = Array.from(text.matchAll(keywordHeadingRegex));
   if (keywordMatches.length > 0) {
     const sections = keywordMatches.map((match, index) => {
@@ -80,11 +80,10 @@ function splitSummarySections(raw: string) {
 
 function splitSummaryItems(body: string) {
   return body
-    .split(/?|
-/)
+    .split(/。|\n/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
-    .map((item) => (item.endsWith('?') ? item : `${item}?`));
+    .map((item) => (item.endsWith('。') ? item : `${item}。`));
 }
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -116,7 +115,7 @@ export default function SubjectDetailPage() {
         setRollup(data);
       } catch (error) {
         console.error(error);
-        setErrorMessage('?????????????????');
+        setErrorMessage('科目詳細の読み込みに失敗しました。');
         setRollup(null);
       } finally {
         setIsLoadingDetail(false);
@@ -143,23 +142,18 @@ export default function SubjectDetailPage() {
   }, [rollup]);
 
   return (
-    <main className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-10">
-      <div className="campus-hero" aria-hidden="true">
-        <div className="campus-hero__orb" />
-        <div className="campus-hero__orb campus-hero__orb--right" />
-      </div>
-
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6">
       <header className="space-y-2">
         <Link
           href={backHref}
           className="inline-flex items-center gap-2 text-sm font-semibold text-brand-600"
         >
-          ? ?????
+          ← 一覧に戻る
         </Link>
-        <p className="badge-soft w-fit">????</p>
-        <h1 className="font-display text-3xl text-gray-900">??????</h1>
-        <p className="text-sm text-gray-600">
-          ????????????????????????
+        <p className="badge-soft w-fit">科目詳細</p>
+        <h1 className="text-2xl font-bold text-gray-900">レビュー概要</h1>
+        <p className="text-sm text-gray-500">
+          授業の集計結果と、レビューの要約を確認できます。
         </p>
       </header>
 
@@ -169,24 +163,27 @@ export default function SubjectDetailPage() {
         </div>
       )}
 
-      <SectionCard title="????">
+      <SectionCard title="科目情報">
         {!isLoadingDetail && rollup && (
           <div>
             <p className="text-xs text-gray-400">{rollup.university.name}</p>
             <h2 className="text-lg font-semibold text-gray-900">{rollup.subject.name}</h2>
           </div>
         )}
-        {isLoadingDetail && <p className="text-sm text-gray-500">??????</p>}
+        {isLoadingDetail && <p className="text-sm text-gray-500">読み込み中…</p>}
         {!isLoadingDetail && !rollup && (
-          <p className="text-sm text-gray-500">????????????????</p>
+          <p className="text-sm text-gray-500">科目情報を取得できませんでした。</p>
         )}
       </SectionCard>
 
-      <SectionCard title="?????">
+      <SectionCard title="指標の概要">
         {!isLoadingDetail && rollup?.rollup ? (
           <div className="grid gap-4 md:grid-cols-2">
             {Object.entries(metricLabels).map(([key, label]) => (
-              <div key={key} className="metric-card">
+              <div
+                key={key}
+                className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3"
+              >
                 <span className="text-sm text-gray-600">{label}</span>
                 <span className="text-sm font-semibold text-gray-900">
                   {formatMetric(rollup.rollup?.[key])}
@@ -196,12 +193,12 @@ export default function SubjectDetailPage() {
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-gray-500">
-            ???????????
+            まだ集計がありません。
           </div>
         )}
       </SectionCard>
 
-      <SectionCard title="??">
+      <SectionCard title="要約">
         {!isLoadingDetail && rollup?.rollup ? (
           summarySections.length > 0 ? (
             <div className="space-y-4">
@@ -220,12 +217,12 @@ export default function SubjectDetailPage() {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-gray-500">
-              ?????????
+              要約がありません。
             </div>
           )
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-gray-500">
-            ?????????
+            要約がありません。
           </div>
         )}
       </SectionCard>
