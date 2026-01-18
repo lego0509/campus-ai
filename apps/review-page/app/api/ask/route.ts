@@ -429,7 +429,7 @@ async function tool_resolve_university(args: { university_name: string; limit: n
   if (!rawName) return { picked: null, candidates: [] as UniversityHit[] };
 
   let name = rawName;
-  const uniMatch = rawName.match(/(.+???)/);
+  const uniMatch = rawName.match(/(.+?大学)/);
   if (uniMatch?.[1]) {
     name = uniMatch[1];
   }
