@@ -423,10 +423,17 @@ async function tool_get_my_affiliation(ctx: { userId: string }) {
 }
 
 async function tool_resolve_university(args: { university_name: string; limit: number }) {
-  const name = (args.university_name ?? '').trim();
+  const rawName = (args.university_name ?? '').trim();
   const limit = Math.max(1, Math.min(10, args.limit || 5));
 
-  if (!name) return { picked: null, candidates: [] as UniversityHit[] };
+  if (!rawName) return { picked: null, candidates: [] as UniversityHit[] };
+
+  let name = rawName;
+  const uniMatch = rawName.match(/(.+???)/);
+  if (uniMatch?.[1]) {
+    name = uniMatch[1];
+  }
+  name = name.replace(/\s+/g, '');
 
   // 完全一致（大小無視）っぽく優先：ilike でワイルドカード無し
   const { data: exact, error: exactErr } = await supabaseAdmin
@@ -504,7 +511,7 @@ function pickNumber(obj: any, keys: string[]) {
 async function tool_get_subject_rollup(args: { subject_id: string }) {
   const subjectId = args.subject_id;
 
-  // 1) rollup本体（列増減に強くするため * で取る）
+  // 1) rollup
   const { data: rollup, error: rollErr } = await supabaseAdmin
     .from('subject_rollups')
     .select('*')
@@ -513,7 +520,7 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
 
   if (rollErr) throw rollErr;
 
-  // 2) subject + university 名
+  // 2) subject + university
   const { data: subj, error: subjErr } = await supabaseAdmin
     .from('subjects')
     .select('id,name,university_id,universities(name)')
@@ -522,7 +529,7 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
 
   if (subjErr) throw subjErr;
 
-  // 3) 単位取得状況（rollups にカラムがあればそれを使う／無ければ保険で集計）
+  // 3) credit outcome fallback
   let noCredit = null as number | null;
   let creditNormal = null as number | null;
   let creditHigh = null as number | null;
@@ -535,7 +542,6 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
     notRated = pickNumber(rollup, ['not_rated', 'not_rated_count', 'count_not_rated', 'cnt_not_rated']);
   }
 
-  // rollup 側に無かったら（or null）最低限だけ集計（上限つき）
   if (noCredit === null || creditNormal === null || creditHigh === null || notRated === null) {
     const { data: perfRows, error: perfErr } = await supabaseAdmin
       .from('course_reviews')
@@ -600,23 +606,45 @@ async function tool_top_subjects_by_metric(args: {
 
   if (!universityId) return [];
 
-  const { data, error } = await supabaseAdmin
-    .from('subject_rollups')
-    .select(`subject_id,review_count,${args.metric},subjects(name,university_id)`)
-    .gte('review_count', minReviews)
-    .order(args.metric, { ascending: args.order === 'asc', nullsFirst: false })
+  const queryRollups = async (min: number) => {
+    const { data, error } = await supabaseAdmin
+      .from('subject_rollups')
+      .select(`subject_id,review_count,${args.metric},subjects!inner(name,university_id)`)
+      .eq('subjects.university_id', universityId)
+      .gte('review_count', min)
+      .order(args.metric, { ascending: args.order === 'asc', nullsFirst: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data || []) as any[];
+  };
+
+  let rows = await queryRollups(minReviews);
+  if (rows.length === 0 && minReviews > 0) {
+    rows = await queryRollups(0);
+  }
+
+  if (rows.length > 0) {
+    return rows.map((r: any) => ({
+      subject_id: r.subject_id,
+      subject_name: r.subjects?.name ?? null,
+      review_count: r.review_count,
+      metric_value: r[args.metric] ?? null,
+      metric: args.metric,
+    }));
+  }
+
+  const { data: subjects, error: subErr } = await supabaseAdmin
+    .from('subjects')
+    .select('id,name')
+    .eq('university_id', universityId)
+    .order('name', { ascending: true })
     .limit(limit);
-
-  if (error) throw error;
-
-  // 大学で絞り込み（join結果の subjects.university_id）
-  const filtered = (data || []).filter((r: any) => r.subjects?.university_id === universityId);
-
-  return filtered.map((r: any) => ({
-    subject_id: r.subject_id,
-    subject_name: r.subjects?.name ?? null,
-    review_count: r.review_count,
-    metric_value: r[args.metric] ?? null,
+  if (subErr) throw subErr;
+  return (subjects || []).map((s: any) => ({
+    subject_id: s.id,
+    subject_name: s.name,
+    review_count: 0,
+    metric_value: null,
     metric: args.metric,
   }));
 }
@@ -642,17 +670,42 @@ async function tool_top_subjects_with_examples(args: {
 
   if (!universityId) return [];
 
-  const { data, error } = await supabaseAdmin
-    .from('subject_rollups')
-    .select(`subject_id,review_count,${args.metric},subjects(name,university_id)`)
-    .gte('review_count', minReviews)
-    .order(args.metric, { ascending: args.order === 'asc', nullsFirst: false })
-    .limit(limit);
+  const queryRollups = async (min: number) => {
+    const { data, error } = await supabaseAdmin
+      .from('subject_rollups')
+      .select(`subject_id,review_count,${args.metric},subjects!inner(name,university_id)`)
+      .eq('subjects.university_id', universityId)
+      .gte('review_count', min)
+      .order(args.metric, { ascending: args.order === 'asc', nullsFirst: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data || []) as any[];
+  };
 
-  if (error) throw error;
+  let filtered = await queryRollups(minReviews);
+  if (filtered.length === 0 && minReviews > 0) {
+    filtered = await queryRollups(0);
+  }
 
-  const filtered = (data || []).filter((r: any) => r.subjects?.university_id === universityId);
-  const results = [];
+  if (filtered.length === 0) {
+    const { data: subjects, error: subErr } = await supabaseAdmin
+      .from('subjects')
+      .select('id,name')
+      .eq('university_id', universityId)
+      .order('name', { ascending: true })
+      .limit(limit);
+    if (subErr) throw subErr;
+    return (subjects || []).map((s: any) => ({
+      subject_id: s.id,
+      subject_name: s.name,
+      review_count: 0,
+      metric_value: null,
+      metric: args.metric,
+      examples: [],
+    }));
+  }
+
+  const results: any[] = [];
 
   for (const r of filtered) {
     const subjectId = r.subject_id as string;
@@ -686,7 +739,6 @@ async function tool_top_subjects_with_examples(args: {
   return results;
 }
 
-/** tool名→実装 のルーター */
 async function callTool(name: string, args: any, ctx: { userId: string }) {
   switch (name) {
     case 'get_my_affiliation':
