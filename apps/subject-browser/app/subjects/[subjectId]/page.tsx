@@ -42,8 +42,7 @@ function formatMetric(value: unknown) {
 }
 
 function splitSummarySections(raw: string) {
-  const text = raw.replace(/
-
+  const text = raw.replace(/
 /g, '
 ').trim();
   if (!text) return [];
@@ -187,10 +186,7 @@ export default function SubjectDetailPage() {
         {!isLoadingDetail && rollup?.rollup ? (
           <div className="grid gap-4 md:grid-cols-2">
             {Object.entries(metricLabels).map(([key, label]) => (
-              <div
-                key={key}
-                className="metric-card"
-              >
+              <div key={key} className="metric-card">
                 <span className="text-sm text-gray-600">{label}</span>
                 <span className="text-sm font-semibold text-gray-900">
                   {formatMetric(rollup.rollup?.[key])}
