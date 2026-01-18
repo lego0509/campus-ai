@@ -508,6 +508,13 @@ function pickNumber(obj: any, keys: string[]) {
   return null;
 }
 
+function roundOneDecimal(value: any) {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  if (Number.isNaN(num)) return null;
+  return Math.round(num * 10) / 10;
+}
+
 async function tool_get_subject_rollup(args: { subject_id: string }) {
   const subjectId = args.subject_id;
 
@@ -570,6 +577,18 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
     if (creditHigh === null) creditHigh = _creditHigh;
   }
 
+    const roundedRollup = rollup
+    ? ({
+        ...rollup,
+        avg_credit_ease: roundOneDecimal(rollup.avg_credit_ease),
+        avg_class_difficulty: roundOneDecimal(rollup.avg_class_difficulty),
+        avg_assignment_load: roundOneDecimal(rollup.avg_assignment_load),
+        avg_attendance_strictness: roundOneDecimal(rollup.avg_attendance_strictness),
+        avg_satisfaction: roundOneDecimal(rollup.avg_satisfaction),
+        avg_recommendation: roundOneDecimal(rollup.avg_recommendation),
+      } as RollupRow)
+    : null;
+
   return {
     subject: {
       id: subj?.id ?? subjectId,
@@ -577,7 +596,7 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
       university_id: subj?.university_id ?? null,
       university_name: (subj as any)?.universities?.name ?? null,
     },
-    rollup: (rollup || null) as RollupRow | null,
+    rollup: roundedRollup,
     credit_outcomes: {
       not_rated: notRated ?? 0,
       no_credit: noCredit ?? 0,
@@ -628,7 +647,7 @@ async function tool_top_subjects_by_metric(args: {
       subject_id: r.subject_id,
       subject_name: r.subjects?.name ?? null,
       review_count: r.review_count,
-      metric_value: r[args.metric] ?? null,
+      metric_value: roundOneDecimal(r[args.metric] ?? null),
       metric: args.metric,
     }));
   }
@@ -721,7 +740,7 @@ async function tool_top_subjects_with_examples(args: {
     if (revErr) throw revErr;
 
     const subjectName = (r as any)?.subjects?.name ?? null;
-    const metricValue = (r as Record<string, unknown>)[args.metric] ?? null;
+    const metricValue = roundOneDecimal((r as Record<string, unknown>)[args.metric] ?? null);
     results.push({
       subject_id: subjectId,
       subject_name: subjectName,
