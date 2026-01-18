@@ -42,10 +42,12 @@ function formatMetric(value: unknown) {
 }
 
 function splitSummarySections(raw: string) {
-  const text = raw.replaceAll('\r\n', '\n').trim();
+  const text = raw.replaceAll('
+', '
+').trim();
   if (!text) return [];
 
-  const bracketHeadingRegex = new RegExp('[?\\[]\\s*([^\\]?]+)\\s*[?\\]]', 'g');
+  const bracketHeadingRegex = new RegExp('[?\[]\s*([^\]?]+)\s*[?\]]', 'g');
   const bracketMatches = Array.from(text.matchAll(bracketHeadingRegex));
   if (bracketMatches.length > 0) {
     const sections = bracketMatches.map((match, index) => {
@@ -59,7 +61,7 @@ function splitSummarySections(raw: string) {
     return sections.filter((section) => section.body.length > 0);
   }
 
-  const keywordHeadingRegex = new RegExp(`(?:^|\\n)\\s*(${summaryHeadings.join('|')})\\s*[:?]`, 'g');
+  const keywordHeadingRegex = new RegExp(`(?:^|\n)\s*(${summaryHeadings.join('|')})\s*[:?]`, 'g');
   const keywordMatches = Array.from(text.matchAll(keywordHeadingRegex));
   if (keywordMatches.length > 0) {
     const sections = keywordMatches.map((match, index) => {
@@ -78,7 +80,8 @@ function splitSummarySections(raw: string) {
 
 function splitSummaryItems(body: string) {
   return body
-    .split(/?|\n/)
+    .split(/?|
+/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .map((item) => (item.endsWith('?') ? item : `${item}?`));
