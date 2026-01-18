@@ -26,7 +26,7 @@ function requireEnv(name: string, value?: string | null) {
 }
 
 const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', process.env.OPENAI_API_KEY);
-const QA_MODEL = process.env.OPENAI_QA_MODEL || 'gpt-5-mini';
+const QA_MODEL = process.env.OPENAI_QA_MODEL || 'gpt-5';
 const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', process.env.LINE_HASH_PEPPER);
 
 /**
@@ -126,7 +126,12 @@ const PROMPT_DEVELOPER = `
 - 最後に、根拠は短く付ける（例：レビュー数、対象大学名、対象科目名）。
 - 返答は簡潔に。長くなる場合は「上位3件＋補足」程度に抑える。
 - スマホLINEで読みやすいように、1行は短め（約14文字前後）で改行する。
-`;
+  [Context handling]
+  - Use recent conversation context and user memory provided above.
+  - If the user omits a university but one is mentioned in recent messages, assume the same university.
+  - If top_subjects_by_metric returns empty, retry with min_reviews=0 and/or use list_subjects_by_university.
+  - When rollups are missing, explain "集計中/データ不足" and provide a fallback list instead of saying "no data".
+  `;
 
 /**
  * =========================================================
@@ -196,6 +201,28 @@ function lineUserIdToHash(lineUserId: string) {
 function supabaseErrorToJson(err: any) {
   if (!err) return null;
   return { message: err.message, code: err.code, details: err.details, hint: err.hint };
+}
+
+async function getUserMemorySummary(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('user_memory')
+    .select('summary_1000')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.summary_1000 ?? '').trim();
+}
+
+async function getRecentChatMessages(userId: string, limit = 12) {
+  const { data, error } = await supabaseAdmin
+    .from('chat_messages')
+    .select('role, content, created_at')
+    .eq('user_id', userId)
+    .in('role', ['user', 'assistant'])
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).reverse();
 }
 
 /** ---------- DBユーティリティ（ユーザーID確定） ---------- */
@@ -707,21 +734,46 @@ function previewJson(v: any, max = 800) {
 
 
 /** ---------- メイン：Function Calling ループ ---------- */
-async function runAgent(params: { userMessage: string; userId: string; debug?: boolean }): Promise<AgentResult> {
-  const { userMessage, userId, debug = false } = params;
+async function runAgent(params: {
+  userMessage: string;
+  userId: string;
+  debug?: boolean;
+  memorySummary?: string;
+  recentMessages?: { role: string; content: string }[];
+}): Promise<AgentResult> {
+  const { userMessage, userId, debug = false, memorySummary, recentMessages } = params;
 
   const developerPrompt = PROMPT_DEVELOPER.trim();
 
   const forced: 'auto' | 'required' = shouldForceTool(userMessage) ? 'required' : 'auto';
   const toolTrace: AgentTraceItem[] = [];
 
+  const memoryMsg = memorySummary
+    ? {
+        role: 'system' as const,
+        content: `User memory (summary):\n${memorySummary}`,
+      }
+    : null;
+
+  const contextMsgs = (recentMessages ?? [])
+    .filter((m) => m?.role && m?.content)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+  const lastMsg = contextMsgs.length ? contextMsgs[contextMsgs.length - 1] : null;
+  const shouldAppendUser =
+    !lastMsg || lastMsg.role !== 'user' || lastMsg.content?.trim() !== userMessage.trim();
+
+  const input = [
+    { role: 'developer' as const, content: developerPrompt },
+    ...(memoryMsg ? [memoryMsg] : []),
+    ...contextMsgs,
+    ...(shouldAppendUser ? [{ role: 'user' as const, content: userMessage }] : []),
+  ];
+
   // 1) 最初の問い合わせ
   let resp = await openai.responses.create({
     model: QA_MODEL,
-    input: [
-      { role: 'developer', content: developerPrompt },
-      { role: 'user', content: userMessage },
-    ],
+    input,
     tools,
     tool_choice: forced,
     parallel_tool_calls: false,
@@ -836,7 +888,18 @@ export async function POST(req: Request) {
     const userId = await getOrCreateUserId(body.line_user_id);
 
 // ここでは「会話ログ保存」は webhook 側でやる前提
-  const r = await runAgent({ userMessage: message, userId, debug });
+  const [memorySummary, recentMessages] = await Promise.all([
+    getUserMemorySummary(userId),
+    getRecentChatMessages(userId, 12),
+  ]);
+
+  const r = await runAgent({
+    userMessage: message,
+    userId,
+    debug,
+    memorySummary,
+    recentMessages,
+  });
   
   return NextResponse.json({
     ok: true,

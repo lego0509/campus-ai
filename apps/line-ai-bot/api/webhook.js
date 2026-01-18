@@ -224,7 +224,7 @@ async function maybeUpdateUserSummary(openai, userId) {
 
   let newSummary = oldSummary;
   try {
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const model = process.env.OPENAI_SUMMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
     const r = await openai.chat.completions.create({
       model,
       messages: prompt,
@@ -342,7 +342,7 @@ async function callAskApi(lineUserId, message) {
  * 通常会話（DB検索しない雑談側）
  */
 async function createChatReply(openai, mem, recent) {
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const model = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || "gpt-5";
 
   const systemMsg =
     "あなたは大学生活支援AIです。ユーザーの個人特定につながる情報は推測しない。短く明確に答える。";
