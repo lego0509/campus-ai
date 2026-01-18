@@ -196,19 +196,12 @@ export default function SubjectBrowserPage() {
   };
 
   return (
-    <main className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-10">
-      <div className="campus-hero" aria-hidden="true">
-        <div className="campus-hero__orb" />
-        <div className="campus-hero__orb campus-hero__orb--right" />
-      </div>
-
-      <header className="space-y-3">
-        <div className="inline-flex items-center gap-3">
-          <span className="badge-soft">Campus Review</span>
-          <span className="campus-accent">Academic Insight</span>
-        </div>
-        <h1 className="font-display text-3xl text-gray-900">????????</h1>
-        <p className="text-sm text-gray-600">
+    <main className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-8">
+      <div className="pointer-events-none absolute inset-0 -z-10 rounded-3xl bg-gradient-to-br from-white via-white to-brand-50 opacity-80" />
+      <header className="space-y-2">
+        <p className="badge-soft w-fit">????????</p>
+        <h1 className="text-2xl font-bold text-gray-900">????????</h1>
+        <p className="text-sm text-gray-500">
           ?????????????????????????????????
         </p>
       </header>
@@ -273,7 +266,7 @@ export default function SubjectBrowserPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="button-outline"
+                className="rounded-md border border-slate-200 px-3 py-1 text-xs font-semibold text-gray-600"
                 onClick={commitUniversity}
               >
                 ??
@@ -349,7 +342,7 @@ export default function SubjectBrowserPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="button-outline"
+              className="rounded-md border border-slate-200 px-3 py-1 text-xs font-semibold text-gray-600"
               onClick={commitSubjectSearch}
               disabled={!selectedUniversityId}
             >
@@ -371,19 +364,21 @@ export default function SubjectBrowserPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           {listItems.map((subject) => (
             <Link
               key={subject.id}
               href={buildSubjectHref(subject.id, selectedUniversityId, selectedUniversityName)}
-              className="subject-card"
+              className="block rounded-lg border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
             >
-              <div className="subject-card__header">
+              <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-gray-900">{subject.name}</p>
                   <p className="text-xs text-gray-500">???? {subject.review_count} ?</p>
                 </div>
-                <span className="subject-chip">????</span>
+                <span className="rounded-full border border-brand-200 px-3 py-1 text-xs font-semibold text-brand-700">
+                  ????
+                </span>
               </div>
             </Link>
           ))}
