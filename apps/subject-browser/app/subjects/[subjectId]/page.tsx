@@ -42,7 +42,8 @@ function formatMetric(value: unknown) {
 }
 
 function splitSummarySections(raw: string) {
-  const text = raw.replace(/
+  const text = raw.replace(/
+
 /g, '
 ').trim();
   if (!text) return [];
@@ -61,10 +62,7 @@ function splitSummarySections(raw: string) {
     return sections.filter((section) => section.body.length > 0);
   }
 
-  const keywordHeadingRegex = new RegExp(
-    `(?:^|\n)\s*(${summaryHeadings.join('|')})\s*[:?]`,
-    'g'
-  );
+  const keywordHeadingRegex = new RegExp(`(?:^|\n)\s*(${summaryHeadings.join('|')})\s*[:?]`, 'g');
   const keywordMatches = Array.from(text.matchAll(keywordHeadingRegex));
   if (keywordMatches.length > 0) {
     const sections = keywordMatches.map((match, index) => {
