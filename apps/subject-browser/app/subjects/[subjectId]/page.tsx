@@ -21,10 +21,69 @@ const metricLabels: Record<string, string> = {
   avg_recommendation: 'おすすめ度',
 };
 
+const summaryHeadings = [
+  '良い点',
+  '悪い点',
+  '注意',
+  '注意点',
+  '改善点',
+  '総評',
+  'まとめ',
+  '特徴',
+  '傾向',
+  '補足',
+];
+
 function formatMetric(value: unknown) {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(2);
   return String(value);
+}
+
+function splitSummarySections(raw: string) {
+  const text = raw.replace(/\r\n/g, '\n').trim();
+  if (!text) return [];
+
+  const bracketHeadingRegex = /[【\[]\s*([^\]】]+)\s*[】\]]/g;
+  const bracketMatches = Array.from(text.matchAll(bracketHeadingRegex));
+  if (bracketMatches.length > 0) {
+    const sections = bracketMatches.map((match, index) => {
+      const title = match[1].trim();
+      const start = (match.index ?? 0) + match[0].length;
+      const end =
+        index + 1 < bracketMatches.length ? (bracketMatches[index + 1].index ?? text.length) : text.length;
+      const body = text.slice(start, end).trim();
+      return { title, body };
+    });
+    return sections.filter((section) => section.body.length > 0);
+  }
+
+  const keywordHeadingRegex = new RegExp(
+    `(?:^|\\n)\\s*(${summaryHeadings.join('|')})\\s*[:：]`,
+    'g'
+  );
+  const keywordMatches = Array.from(text.matchAll(keywordHeadingRegex));
+  if (keywordMatches.length > 0) {
+    const sections = keywordMatches.map((match, index) => {
+      const title = match[1].trim();
+      const start = (match.index ?? 0) + match[0].length;
+      const end =
+        index + 1 < keywordMatches.length ? (keywordMatches[index + 1].index ?? text.length) : text.length;
+      const body = text.slice(start, end).trim();
+      return { title, body };
+    });
+    return sections.filter((section) => section.body.length > 0);
+  }
+
+  return [{ title: '', body: text }];
+}
+
+function splitSummaryItems(body: string) {
+  return body
+    .split(/。|\n/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .map((item) => (item.endsWith('。') ? item : `${item}。`));
 }
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -73,6 +132,14 @@ export default function SubjectDetailPage() {
     const suffix = params.toString();
     return suffix ? `/?${suffix}` : '/';
   }, [universityId, universityName]);
+
+  const summarySections = useMemo(() => {
+    const summary = rollup?.rollup?.summary_1000?.trim() ?? '';
+    return splitSummarySections(summary).map((section) => ({
+      title: section.title,
+      items: splitSummaryItems(section.body),
+    }));
+  }, [rollup]);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6">
@@ -133,12 +200,26 @@ export default function SubjectDetailPage() {
 
       <SectionCard title="要約">
         {!isLoadingDetail && rollup?.rollup ? (
-          <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <p className="text-sm font-semibold text-gray-700">要約</p>
-            <p className="mt-2 text-sm text-gray-700">
-              {rollup.rollup?.summary_1000?.trim() || '要約がありません。'}
-            </p>
-          </div>
+          summarySections.length > 0 ? (
+            <div className="space-y-4">
+              {summarySections.map((section, sectionIndex) => (
+                <div key={`${section.title}-${sectionIndex}`} className="space-y-2">
+                  {section.title && (
+                    <p className="text-sm font-semibold text-gray-700">{section.title}</p>
+                  )}
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+                    {section.items.map((item, itemIndex) => (
+                      <li key={`${section.title}-${itemIndex}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-gray-500">
+              要約がありません。
+            </div>
+          )
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-gray-500">
             要約がありません。

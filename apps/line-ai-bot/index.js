@@ -15,7 +15,7 @@ bot.on("message", async (event) => {
   const userText = event.message.text;
 
   const response = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
+    model: process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || "gpt-5",
     messages: [{ role: "user", content: userText }],
   });
 
