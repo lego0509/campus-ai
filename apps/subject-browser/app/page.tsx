@@ -23,11 +23,7 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
   return (await res.json()) as T;
 }
 
-function buildSubjectHref(
-  subjectId: string,
-  universityId: string,
-  universityName: string
-) {
+function buildSubjectHref(subjectId: string, universityId: string, universityName: string) {
   const params = new URLSearchParams();
   if (universityId) params.set('universityId', universityId);
   if (universityName) params.set('universityName', universityName);
@@ -35,14 +31,24 @@ function buildSubjectHref(
   return suffix ? `/subjects/${subjectId}?${suffix}` : `/subjects/${subjectId}`;
 }
 
+function normalizeText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, '');
+}
+
 export default function SubjectBrowserPage() {
   const [universities, setUniversities] = useState<University[]>([]);
   const [universityQuery, setUniversityQuery] = useState('');
   const [selectedUniversityId, setSelectedUniversityId] = useState('');
   const [subjects, setSubjects] = useState<SubjectSummary[]>([]);
+  const [subjectQuery, setSubjectQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SubjectSummary[]>([]);
+  const [subjectCache, setSubjectCache] = useState<Record<string, SubjectSummary[]>>({});
   const [isLoadingSubjects, setIsLoadingSubjects] = useState(false);
+  const [isUniversityFocused, setIsUniversityFocused] = useState(false);
+  const [isSubjectFocused, setIsSubjectFocused] = useState(false);
+  const [universityCommitted, setUniversityCommitted] = useState(false);
+  const [subjectCommitted, setSubjectCommitted] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
@@ -54,7 +60,7 @@ export default function SubjectBrowserPage() {
         setUniversities(data.universities ?? []);
       } catch (error) {
         console.error(error);
-        setErrorMessage('大学一覧の読み込みに失敗しました。');
+        setErrorMessage('?????????????????');
       }
     };
 
@@ -67,7 +73,10 @@ export default function SubjectBrowserPage() {
     const universityName = params.get('universityName') ?? '';
 
     if (universityId) setSelectedUniversityId(universityId);
-    if (universityName) setUniversityQuery(universityName);
+    if (universityName) {
+      setUniversityQuery(universityName);
+      setUniversityCommitted(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -78,28 +87,35 @@ export default function SubjectBrowserPage() {
       return;
     }
 
+    if (subjectCache[selectedUniversityId]) {
+      setSubjects(subjectCache[selectedUniversityId]);
+      return;
+    }
+
     const loadSubjects = async () => {
       setIsLoadingSubjects(true);
       try {
         const data = await fetchJson<{ ok: boolean; subjects: SubjectSummary[] }>(
           `/api/public/subjects?universityId=${selectedUniversityId}`
         );
-        setSubjects(data.subjects ?? []);
+        const items = data.subjects ?? [];
+        setSubjects(items);
+        setSubjectCache((prev) => ({ ...prev, [selectedUniversityId]: items }));
         setSearchResults([]);
       } catch (error) {
         console.error(error);
-        setErrorMessage('科目一覧の読み込みに失敗しました。');
+        setErrorMessage('?????????????????');
       } finally {
         setIsLoadingSubjects(false);
       }
     };
 
     loadSubjects();
-  }, [selectedUniversityId]);
+  }, [selectedUniversityId, subjectCache]);
 
   useEffect(() => {
     if (!selectedUniversityId) return;
-    if (searchQuery.trim().length === 0) {
+    if (subjectQuery.trim().length === 0) {
       setSearchResults([]);
       return;
     }
@@ -108,17 +124,17 @@ export default function SubjectBrowserPage() {
       try {
         const data = await fetchJson<{ ok: boolean; subjects: SubjectSummary[] }>(
           `/api/public/subjects?universityId=${selectedUniversityId}&query=${encodeURIComponent(
-            searchQuery.trim()
+            subjectQuery.trim()
           )}`
         );
         setSearchResults(data.subjects ?? []);
       } catch (error) {
         console.error(error);
       }
-    }, 250);
+    }, 200);
 
     return () => window.clearTimeout(timer);
-  }, [searchQuery, selectedUniversityId]);
+  }, [subjectQuery, selectedUniversityId]);
 
   const selectedUniversityName =
     universities.find((university) => university.id === selectedUniversityId)?.name ?? '';
@@ -131,41 +147,62 @@ export default function SubjectBrowserPage() {
   }, [searchQuery, searchResults, subjects]);
 
   const subjectSuggestions = useMemo(() => {
-    if (searchQuery.trim().length === 0) return [];
+    if (subjectQuery.trim().length === 0) return [];
     return searchResults.slice(0, 6);
-  }, [searchQuery, searchResults]);
+  }, [subjectQuery, searchResults]);
 
   const universitySuggestions = useMemo(() => {
     if (universityQuery.trim().length === 0) return [];
-    const query = universityQuery.trim().toLowerCase();
+    const query = normalizeText(universityQuery.trim());
     return universities
-      .filter((university) => university.name.toLowerCase().includes(query))
+      .filter((university) => normalizeText(university.name).includes(query))
       .slice(0, 8);
   }, [universities, universityQuery]);
 
   const handleSelectUniversity = (university: University) => {
     setSelectedUniversityId(university.id);
     setUniversityQuery(university.name);
+    setUniversityCommitted(true);
     setSearchQuery('');
+    setSubjectQuery('');
+    setSubjectCommitted(false);
     setSearchResults([]);
     setErrorMessage('');
+  };
+
+  const commitUniversity = () => {
+    if (!universityQuery.trim()) return;
+    if (universitySuggestions.length > 0) {
+      handleSelectUniversity(universitySuggestions[0]);
+      return;
+    }
+    setErrorMessage('??????????????????');
   };
 
   const handleClearUniversity = () => {
     setSelectedUniversityId('');
     setUniversityQuery('');
+    setUniversityCommitted(false);
     setSubjects([]);
     setSearchQuery('');
+    setSubjectQuery('');
+    setSubjectCommitted(false);
     setSearchResults([]);
   };
 
+  const commitSubjectSearch = () => {
+    setSearchQuery(subjectQuery.trim());
+    setSubjectCommitted(true);
+  };
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6">
+    <main className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-8">
+      <div className="pointer-events-none absolute inset-0 -z-10 rounded-3xl bg-gradient-to-br from-white via-white to-brand-50 opacity-80" />
       <header className="space-y-2">
-        <p className="badge-soft w-fit">授業レビュー一覧</p>
-        <h1 className="text-2xl font-bold text-gray-900">大学・科目の一覧</h1>
+        <p className="badge-soft w-fit">????????</p>
+        <h1 className="text-2xl font-bold text-gray-900">????????</h1>
         <p className="text-sm text-gray-500">
-          大学名を入力して選択すると、科目一覧とレビュー集計が確認できます。
+          ?????????????????????????????????
         </p>
       </header>
 
@@ -175,10 +212,10 @@ export default function SubjectBrowserPage() {
         </div>
       )}
 
-      <SectionCard title="大学を選択">
+      <SectionCard title="?????">
         <div className="field-wrapper">
           <label className="label" htmlFor="university">
-            大学
+            ??
           </label>
           <div className="relative">
             <input
@@ -188,10 +225,21 @@ export default function SubjectBrowserPage() {
               onChange={(event) => {
                 setUniversityQuery(event.target.value);
                 setSelectedUniversityId('');
+                setUniversityCommitted(false);
               }}
-              placeholder="大学名を入力してください"
+              onFocus={() => setIsUniversityFocused(true)}
+              onBlur={() => {
+                window.setTimeout(() => setIsUniversityFocused(false), 120);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitUniversity();
+                }
+              }}
+              placeholder="????????????"
             />
-            {universitySuggestions.length > 0 && (
+            {isUniversityFocused && !universityCommitted && universitySuggestions.length > 0 && (
               <div className="absolute z-10 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
                 <ul className="max-h-56 overflow-y-auto text-sm">
                   {universitySuggestions.map((university) => (
@@ -199,7 +247,7 @@ export default function SubjectBrowserPage() {
                       <button
                         type="button"
                         className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-slate-50"
-                        onClick={() => handleSelectUniversity(university)}
+                        onMouseDown={() => handleSelectUniversity(university)}
                       >
                         <span>{university.name}</span>
                       </button>
@@ -209,60 +257,78 @@ export default function SubjectBrowserPage() {
               </div>
             )}
           </div>
-          <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-gray-500">
             <span>
               {selectedUniversityId
-                ? `選択中: ${selectedUniversityName}`
-                : '候補から大学を選択してください'}
+                ? `???: ${selectedUniversityName}`
+                : '???????????????'}
             </span>
-            {selectedUniversityId && (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="text-xs font-semibold text-brand-600"
-                onClick={handleClearUniversity}
+                className="rounded-md border border-slate-200 px-3 py-1 text-xs font-semibold text-gray-600"
+                onClick={commitUniversity}
               >
-                クリア
+                ??
               </button>
-            )}
+              {selectedUniversityId && (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-brand-600"
+                  onClick={handleClearUniversity}
+                >
+                  ???
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="科目を探す"
-        subtitle={selectedUniversityName ? `${selectedUniversityName} の科目` : undefined}
-      >
+      <SectionCard title="?????" subtitle={selectedUniversityName ? `${selectedUniversityName} ???` : undefined}>
         <div className="field-wrapper">
           <label className="label" htmlFor="subject-search">
-            科目検索
+            ????
           </label>
           <div className="relative">
             <input
               id="subject-search"
               className="control"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="科目名で検索"
+              value={subjectQuery}
+              onChange={(event) => {
+                setSubjectQuery(event.target.value);
+                setSubjectCommitted(false);
+              }}
+              onFocus={() => setIsSubjectFocused(true)}
+              onBlur={() => {
+                window.setTimeout(() => setIsSubjectFocused(false), 120);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitSubjectSearch();
+                }
+              }}
+              placeholder="??????"
               disabled={!selectedUniversityId}
             />
-            {subjectSuggestions.length > 0 && (
+            {isSubjectFocused && !subjectCommitted && subjectSuggestions.length > 0 && (
               <div className="absolute z-10 mt-2 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
                 <ul className="max-h-56 overflow-y-auto text-sm">
                   {subjectSuggestions.map((subject) => (
                     <li key={subject.id}>
-                      <Link
-                        href={buildSubjectHref(
-                          subject.id,
-                          selectedUniversityId,
-                          selectedUniversityName
-                        )}
+                      <button
+                        type="button"
                         className="flex w-full items-center justify-between px-4 py-2 text-left hover:bg-slate-50"
+                        onMouseDown={() => {
+                          setSubjectQuery(subject.name);
+                          setSearchQuery(subject.name);
+                          setSubjectCommitted(true);
+                        }}
                       >
                         <span>{subject.name}</span>
-                        <span className="text-xs text-gray-400">
-                          {subject.review_count}件
-                        </span>
-                      </Link>
+                        <span className="text-xs text-gray-400">{subject.review_count}?</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -271,51 +337,61 @@ export default function SubjectBrowserPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm text-gray-500">
-            <span>{isLoadingSubjects ? '読み込み中…' : `${listItems.length} 件`}</span>
-            {searchQuery.trim().length > 0 && (
+        <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+          <span>{isLoadingSubjects ? '??????' : `${listItems.length} ?`}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 px-3 py-1 text-xs font-semibold text-gray-600"
+              onClick={commitSubjectSearch}
+              disabled={!selectedUniversityId}
+            >
+              ??
+            </button>
+            {subjectQuery.trim().length > 0 && (
               <button
                 type="button"
                 className="text-xs font-semibold text-brand-600"
-                onClick={() => setSearchQuery('')}
+                onClick={() => {
+                  setSubjectQuery('');
+                  setSearchQuery('');
+                  setSubjectCommitted(false);
+                }}
               >
-                クリア
+                ???
               </button>
             )}
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {listItems.map((subject) => (
-              <div key={subject.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{subject.name}</p>
-                    <p className="text-xs text-gray-500">レビュー {subject.review_count} 件</p>
-                  </div>
-                  <Link
-                    href={buildSubjectHref(
-                      subject.id,
-                      selectedUniversityId,
-                      selectedUniversityName
-                    )}
-                    className="rounded-full border border-brand-200 px-3 py-1 text-xs font-semibold text-brand-700"
-                  >
-                    科目詳細
-                  </Link>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {listItems.map((subject) => (
+            <Link
+              key={subject.id}
+              href={buildSubjectHref(subject.id, selectedUniversityId, selectedUniversityName)}
+              className="block rounded-lg border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{subject.name}</p>
+                  <p className="text-xs text-gray-500">???? {subject.review_count} ?</p>
                 </div>
+                <span className="rounded-full border border-brand-200 px-3 py-1 text-xs font-semibold text-brand-700">
+                  ????
+                </span>
               </div>
-            ))}
-            {!isLoadingSubjects && selectedUniversityId && listItems.length === 0 && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-gray-500">
-                条件に合う科目が見つかりませんでした。
-              </div>
-            )}
-            {!selectedUniversityId && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-gray-500">
-                まずは大学を選択してください。
-              </div>
-            )}
-          </div>
+            </Link>
+          ))}
+          {!isLoadingSubjects && selectedUniversityId && listItems.length === 0 && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-gray-500">
+              ???????????????????
+            </div>
+          )}
+          {!selectedUniversityId && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-gray-500">
+              ???????????????
+            </div>
+          )}
         </div>
       </SectionCard>
     </main>

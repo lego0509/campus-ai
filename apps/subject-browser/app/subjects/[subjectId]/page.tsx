@@ -36,7 +36,7 @@ const summaryHeadings = [
 
 function formatMetric(value: unknown) {
   if (value === null || value === undefined) return '—';
-  if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(2);
+  if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(1);
   return String(value);
 }
 

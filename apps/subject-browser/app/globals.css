@@ -7,7 +7,9 @@
 }
 
 body {
-  @apply antialiased;
+  @apply antialiased bg-slate-50;
+  background-image: radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 55%),
+    radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.06), transparent 45%);
 }
 
 input[type='text'],
