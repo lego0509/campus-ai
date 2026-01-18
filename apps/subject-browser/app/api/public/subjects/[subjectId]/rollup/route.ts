@@ -25,7 +25,7 @@ export async function GET(
       .from('subjects')
       .select('id, name, university_id')
       .eq('id', subjectId)
-      .maybeSingle();
+      .maybeSingle<{ id: string; name: string; university_id: string }>();
 
     if (subjectErr) {
       return NextResponse.json(
@@ -42,7 +42,7 @@ export async function GET(
       .from('universities')
       .select('id, name')
       .eq('id', subject.university_id)
-      .maybeSingle();
+      .maybeSingle<{ id: string; name: string }>();
 
     if (uniErr) {
       return NextResponse.json(
