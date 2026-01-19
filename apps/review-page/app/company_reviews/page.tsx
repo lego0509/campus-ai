@@ -149,8 +149,11 @@ export default function CompanyReviewFormPage() {
           }
         }
 
-        const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-        if (!liffId) throw new Error('NEXT_PUBLIC_LIFF_ID is not set');
+        const liffId =
+          process.env.NEXT_PUBLIC_LIFF_ID_COMPANY || process.env.NEXT_PUBLIC_LIFF_ID;
+        if (!liffId) {
+          throw new Error('NEXT_PUBLIC_LIFF_ID_COMPANY is not set');
+        }
 
         await liff.init({ liffId });
 
