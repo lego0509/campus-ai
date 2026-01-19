@@ -374,6 +374,60 @@ export async function POST(req: Request) {
 
     insertedReviewId = inserted.id;
 
+    // ----------------------------
+    // 7) company_embedding_jobs を queued で積む
+    // ----------------------------
+    {
+      const { error: jobErr } = await supabaseAdmin
+        .from('company_embedding_jobs')
+        .upsert(
+          {
+            review_id: insertedReviewId,
+            status: 'queued',
+            attempt_count: 0,
+            last_error: null,
+            locked_at: null,
+            locked_by: null,
+          },
+          { onConflict: 'review_id' }
+        );
+
+      if (jobErr) {
+        await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
+        insertedReviewId = null;
+
+        return NextResponse.json(
+          { error: 'failed to upsert company_embedding_jobs', details: supabaseErrorToJson(jobErr) },
+          { status: 500 }
+        );
+      }
+    }
+
+    // ----------------------------
+    // 8) company_rollups を dirty にする
+    // ----------------------------
+    {
+      const { error: rollErr } = await supabaseAdmin
+        .from('company_rollups')
+        .upsert(
+          {
+            company_id: companyId,
+            is_dirty: true,
+          },
+          { onConflict: 'company_id' }
+        );
+
+      if (rollErr) {
+        await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
+        insertedReviewId = null;
+
+        return NextResponse.json(
+          { error: 'failed to upsert company_rollups', details: supabaseErrorToJson(rollErr) },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json({ ok: true, review_id: insertedReviewId, company_id: companyId });
   } catch (e: any) {
     console.error('[company-reviews] POST error:', e);
