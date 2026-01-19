@@ -407,24 +407,51 @@ export async function POST(req: Request) {
     // 8) company_rollups を dirty にする
     // ----------------------------
     {
-      const { error: rollErr } = await supabaseAdmin
+      const { data: existing, error: findErr } = await supabaseAdmin
         .from('company_rollups')
-        .upsert(
-          {
-            company_id: companyId,
-            is_dirty: true,
-          },
-          { onConflict: 'company_id' }
-        );
+        .select('id')
+        .eq('company_id', companyId)
+        .maybeSingle();
 
-      if (rollErr) {
+      if (findErr) {
         await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
         insertedReviewId = null;
 
         return NextResponse.json(
-          { error: 'failed to upsert company_rollups', details: supabaseErrorToJson(rollErr) },
+          { error: 'failed to fetch company_rollups', details: supabaseErrorToJson(findErr) },
           { status: 500 }
         );
+      }
+
+      if (existing?.id) {
+        const { error: updErr } = await supabaseAdmin
+          .from('company_rollups')
+          .update({ is_dirty: true })
+          .eq('id', existing.id);
+
+        if (updErr) {
+          await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
+          insertedReviewId = null;
+
+          return NextResponse.json(
+            { error: 'failed to update company_rollups', details: supabaseErrorToJson(updErr) },
+            { status: 500 }
+          );
+        }
+      } else {
+        const { error: insErr } = await supabaseAdmin
+          .from('company_rollups')
+          .insert({ company_id: companyId, is_dirty: true });
+
+        if (insErr) {
+          await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
+          insertedReviewId = null;
+
+          return NextResponse.json(
+            { error: 'failed to insert company_rollups', details: supabaseErrorToJson(insErr) },
+            { status: 500 }
+          );
+        }
       }
     }
 
