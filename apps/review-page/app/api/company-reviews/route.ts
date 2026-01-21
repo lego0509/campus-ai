@@ -404,54 +404,29 @@ export async function POST(req: Request) {
     }
 
     // ----------------------------
-    // 8) company_rollups を dirty にする
+    // 8) company_rollups を dirty にする（複合PK）
     // ----------------------------
     {
-      const { data: existing, error: findErr } = await supabaseAdmin
+      const { error: upsertErr } = await supabaseAdmin
         .from('company_rollups')
-        .select('id')
-        .eq('company_id', companyId)
-        .maybeSingle();
+        .upsert(
+          {
+            university_id: universityId,
+            faculty,
+            company_id: companyId,
+            is_dirty: true,
+          },
+          { onConflict: 'university_id,faculty,company_id' }
+        );
 
-      if (findErr) {
+      if (upsertErr) {
         await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
         insertedReviewId = null;
 
         return NextResponse.json(
-          { error: 'failed to fetch company_rollups', details: supabaseErrorToJson(findErr) },
+          { error: 'failed to upsert company_rollups', details: supabaseErrorToJson(upsertErr) },
           { status: 500 }
         );
-      }
-
-      if (existing?.id) {
-        const { error: updErr } = await supabaseAdmin
-          .from('company_rollups')
-          .update({ is_dirty: true })
-          .eq('id', existing.id);
-
-        if (updErr) {
-          await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
-          insertedReviewId = null;
-
-          return NextResponse.json(
-            { error: 'failed to update company_rollups', details: supabaseErrorToJson(updErr) },
-            { status: 500 }
-          );
-        }
-      } else {
-        const { error: insErr } = await supabaseAdmin
-          .from('company_rollups')
-          .insert({ company_id: companyId, is_dirty: true });
-
-        if (insErr) {
-          await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
-          insertedReviewId = null;
-
-          return NextResponse.json(
-            { error: 'failed to insert company_rollups', details: supabaseErrorToJson(insErr) },
-            { status: 500 }
-          );
-        }
       }
     }
 
