@@ -10,24 +10,15 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * ---------------------------
  * このエンドポイントの責務
  * ---------------------------
- * - embedding_jobs の queued / failed を拾って embedding を作る
- * - course_reviews の本文から SHA256(content_hash) を作る
- * - course_review_embeddings を upsert する（冪等）
- * - embedding_jobs を done / failed に更新し、失敗理由を残す
- *
- * rollups（avg/summary）は一切触らない。責務分離。
+ * - company_embedding_jobs の queued / failed を拾って embedding を作る
+ * - company_reviews の本文から SHA256(content_hash) を作る
+ * - company_review_embeddings を upsert する（冪等）
+ * - company_embedding_jobs を done / failed に更新し、失敗理由を残す
  */
 
-/** 1回の実行で処理する最大件数（重いので小さめから） */
 const MAX_JOBS_PER_RUN = 50;
-
-/** OpenAI embeddings をまとめて投げるサイズ（呼び出し回数削減） */
 const EMBEDDING_BATCH_SIZE = 16;
-
-/** 二重起動や途中落ち対策：この分以上ロックが古ければ再取得可能 */
 const LOCK_STALE_MINUTES = 15;
-
-// -------- 共通 util --------
 
 function supabaseErrorToJson(err: any) {
   if (!err) return null;
@@ -49,7 +40,6 @@ function requireEnv(name: string, value?: string | null) {
   return value;
 }
 
-/** バッチ用の簡易認証（GitHub Actions からの叩き専用） */
 function checkBatchAuth(req: Request) {
   const expected = requireEnv('BATCH_TOKEN', process.env.BATCH_TOKEN);
   const got = req.headers.get('x-batch-token') || '';
@@ -57,7 +47,6 @@ function checkBatchAuth(req: Request) {
 }
 
 function getOpenAIForEmbeddings() {
-  // 分けたい場合：OPENAI_API_KEY_EMBEDDINGS を設定すればそちら優先
   const apiKey =
     process.env.OPENAI_API_KEY_EMBEDDINGS || process.env.OPENAI_API_KEY || '';
   requireEnv('OPENAI_API_KEY(or _EMBEDDINGS)', apiKey);
@@ -67,8 +56,6 @@ function getOpenAIForEmbeddings() {
 function getEmbeddingModel() {
   return process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
 }
-
-// -------- DB 型（必要最低限） --------
 
 type JobRow = {
   review_id: string;
@@ -83,17 +70,15 @@ type BodyRow = {
   body_main: string;
 };
 
-type FlagRow = {
-  review_id: string;
-  ai_flagged: boolean;
-};
-
 type EmbMetaRow = {
   review_id: string;
   content_hash: string | null;
 };
 
-// -------- メイン --------
+type FlagRow = {
+  review_id: string;
+  ai_flagged: boolean;
+};
 
 export async function POST(req: Request) {
   const startedAt = Date.now();
@@ -103,7 +88,6 @@ export async function POST(req: Request) {
     'unknown-runner';
 
   try {
-    // 1) 認証。これが無いと誰でも叩けてOpenAI課金が燃える。
     if (!checkBatchAuth(req)) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
@@ -111,22 +95,19 @@ export async function POST(req: Request) {
     const openai = getOpenAIForEmbeddings();
     const model = getEmbeddingModel();
 
-    // 2) まず、処理対象の job を拾う（queued/failed）
-    //    lockが古いものは再取得してよい（途中で落ちたケース）
     const staleBefore = new Date(Date.now() - LOCK_STALE_MINUTES * 60 * 1000).toISOString();
 
     const { data: jobs, error: jobsErr } = await supabaseAdmin
-      .from('embedding_jobs')
+      .from('company_embedding_jobs')
       .select('review_id,status,attempt_count,locked_at,locked_by')
       .in('status', ['queued', 'failed'])
-      // locked_at が null か、古い（stale）ものだけ
       .or(`locked_at.is.null,locked_at.lt.${staleBefore}`)
       .order('updated_at', { ascending: true })
       .limit(MAX_JOBS_PER_RUN);
 
     if (jobsErr) {
       return NextResponse.json(
-        { ok: false, error: 'failed to fetch embedding_jobs', details: supabaseErrorToJson(jobsErr) },
+        { ok: false, error: 'failed to fetch company_embedding_jobs', details: supabaseErrorToJson(jobsErr) },
         { status: 500 }
       );
     }
@@ -136,7 +117,7 @@ export async function POST(req: Request) {
     if (picked.length === 0) {
       return NextResponse.json({
         ok: true,
-        message: 'no embedding jobs',
+        message: 'no company embedding jobs',
         runner,
         elapsed_ms: Date.now() - startedAt,
         counts: { picked: 0, done: 0, skipped: 0, failed: 0 },
@@ -145,12 +126,10 @@ export async function POST(req: Request) {
 
     const reviewIds = picked.map((j) => j.review_id);
 
-    // 3) 先にロックを取る（processingへ）
-    //    完全な排他ロックではないが、同時実行が起きても被害を減らす
     {
       const nowIso = new Date().toISOString();
       const { error: lockErr } = await supabaseAdmin
-        .from('embedding_jobs')
+        .from('company_embedding_jobs')
         .update({
           status: 'processing',
           locked_at: nowIso,
@@ -162,15 +141,14 @@ export async function POST(req: Request) {
 
       if (lockErr) {
         return NextResponse.json(
-          { ok: false, error: 'failed to lock embedding_jobs', details: supabaseErrorToJson(lockErr) },
+          { ok: false, error: 'failed to lock company_embedding_jobs', details: supabaseErrorToJson(lockErr) },
           { status: 500 }
         );
       }
     }
 
-    // 4) AIフラグ済みのレビューは埋め込み対象外にする
     const { data: flaggedRows, error: flaggedErr } = await supabaseAdmin
-      .from('course_review_ai_flags')
+      .from('company_review_ai_flags')
       .select('review_id,ai_flagged')
       .in('review_id', reviewIds)
       .eq('ai_flagged', true);
@@ -188,9 +166,8 @@ export async function POST(req: Request) {
       const flaggedIds = Array.from(flaggedSet);
       const nowIso = new Date().toISOString();
 
-      // 既存の埋め込みを削除（検索対象から外す）
       const { error: delErr } = await supabaseAdmin
-        .from('course_review_embeddings')
+        .from('company_review_embeddings')
         .delete()
         .in('review_id', flaggedIds);
 
@@ -201,9 +178,8 @@ export async function POST(req: Request) {
         );
       }
 
-      // ジョブは done にして再処理を避ける（理由を残す）
       const { error: doneErr } = await supabaseAdmin
-        .from('embedding_jobs')
+        .from('company_embedding_jobs')
         .update({
           status: 'done',
           last_error: 'ai_flagged',
@@ -226,7 +202,7 @@ export async function POST(req: Request) {
     if (pickedActive.length === 0) {
       return NextResponse.json({
         ok: true,
-        message: 'no embedding jobs (all flagged)',
+        message: 'no company embedding jobs (all flagged)',
         runner,
         elapsed_ms: Date.now() - startedAt,
         counts: { picked: picked.length, done: 0, skipped: 0, failed: 0 },
@@ -235,17 +211,16 @@ export async function POST(req: Request) {
 
     const activeReviewIds = pickedActive.map((j) => j.review_id);
 
-    // 5) 本文をまとめて取得
     const bodyMap = new Map<string, string>();
     for (const ids of chunk(activeReviewIds, 200)) {
       const { data: bodies, error: bodiesErr } = await supabaseAdmin
-        .from('course_reviews')
+        .from('company_reviews')
         .select('id,body_main')
         .in('id', ids);
 
       if (bodiesErr) {
         return NextResponse.json(
-          { ok: false, error: 'failed to fetch course_reviews', details: supabaseErrorToJson(bodiesErr) },
+          { ok: false, error: 'failed to fetch company_reviews', details: supabaseErrorToJson(bodiesErr) },
           { status: 500 }
         );
       }
@@ -255,17 +230,16 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6) 既存 embedding の content_hash をまとめて取得（本文が変わってないならスキップ可能）
     const hashMap = new Map<string, string | null>();
     for (const ids of chunk(activeReviewIds, 200)) {
       const { data: metas, error: metaErr } = await supabaseAdmin
-        .from('course_review_embeddings')
+        .from('company_review_embeddings')
         .select('review_id,content_hash')
         .in('review_id', ids);
 
       if (metaErr) {
         return NextResponse.json(
-          { ok: false, error: 'failed to fetch course_review_embeddings meta', details: supabaseErrorToJson(metaErr) },
+          { ok: false, error: 'failed to fetch company_review_embeddings meta', details: supabaseErrorToJson(metaErr) },
           { status: 500 }
         );
       }
@@ -275,9 +249,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6) embeddingが必要なものを抽出
-    //    - body が無い → 不整合。failedにして理由を残す
-    //    - content_hash一致 → embeddingは最新。doneにしてスキップ
     const need: { review_id: string; body: string; hash: string; attempt_count: number }[] = [];
     const toDoneSkip: string[] = [];
     const toFailMissingBody: { review_id: string; error: string; attempt_count: number }[] = [];
@@ -288,7 +259,7 @@ export async function POST(req: Request) {
         toFailMissingBody.push({
           review_id: j.review_id,
           attempt_count: j.attempt_count,
-          error: 'missing body_main in course_reviews',
+          error: 'missing body_main in company_reviews',
         });
         continue;
       }
@@ -304,12 +275,11 @@ export async function POST(req: Request) {
       need.push({ review_id: j.review_id, body, hash: h, attempt_count: j.attempt_count });
     }
 
-    // 7) スキップ分は job を done に
     let skipped = 0;
     if (toDoneSkip.length > 0) {
       const nowIso = new Date().toISOString();
       const { error: doneErr } = await supabaseAdmin
-        .from('embedding_jobs')
+        .from('company_embedding_jobs')
         .update({
           status: 'done',
           last_error: null,
@@ -328,7 +298,6 @@ export async function POST(req: Request) {
       skipped = toDoneSkip.length;
     }
 
-    // 8) 本文欠損は failed
     let failed = 0;
     if (toFailMissingBody.length > 0) {
       const nowIso = new Date().toISOString();
@@ -343,7 +312,7 @@ export async function POST(req: Request) {
       }));
 
       const { error: failErr } = await supabaseAdmin
-        .from('embedding_jobs')
+        .from('company_embedding_jobs')
         .upsert(rows, { onConflict: 'review_id' });
 
       if (failErr) {
@@ -355,14 +324,12 @@ export async function POST(req: Request) {
       failed += rows.length;
     }
 
-    // 9) embedding生成（OpenAI）→ embeddings upsert → job done/failed
     let done = 0;
 
     for (const batch of chunk(need, EMBEDDING_BATCH_SIZE)) {
       const nowIso = new Date().toISOString();
 
       try {
-        // OpenAIへまとめて投げる
         const resp = await openai.embeddings.create({
           model,
           input: batch.map((x) => x.body),
@@ -374,7 +341,6 @@ export async function POST(req: Request) {
           throw new Error(`embedding response mismatch: got ${vecs.length}, expected ${batch.length}`);
         }
 
-        // embeddingsを upsert（review_id PK）
         const embedRows = batch.map((x, i) => ({
           review_id: x.review_id,
           embedding: vecs[i],
@@ -384,12 +350,11 @@ export async function POST(req: Request) {
         }));
 
         const { error: upErr } = await supabaseAdmin
-          .from('course_review_embeddings')
+          .from('company_review_embeddings')
           .upsert(embedRows, { onConflict: 'review_id' });
 
         if (upErr) throw upErr;
 
-        // job を done に（attempt_countは+1して記録）
         const jobRows = batch.map((x) => ({
           review_id: x.review_id,
           status: 'done',
@@ -401,7 +366,7 @@ export async function POST(req: Request) {
         }));
 
         const { error: jobDoneErr } = await supabaseAdmin
-          .from('embedding_jobs')
+          .from('company_embedding_jobs')
           .upsert(jobRows, { onConflict: 'review_id' });
 
         if (jobDoneErr) throw jobDoneErr;
@@ -410,7 +375,6 @@ export async function POST(req: Request) {
       } catch (e: any) {
         const msg = e?.message ?? 'embedding batch failed';
 
-        // このバッチ分だけ failed にして次へ（全体停止しない）
         const jobFailRows = batch.map((x) => ({
           review_id: x.review_id,
           status: 'failed',
@@ -422,13 +386,12 @@ export async function POST(req: Request) {
         }));
 
         const { error: jobFailErr } = await supabaseAdmin
-          .from('embedding_jobs')
+          .from('company_embedding_jobs')
           .upsert(jobFailRows, { onConflict: 'review_id' });
 
         if (jobFailErr) {
-          // ここで死ぬと復旧面倒なので、レスポンスにエラーを返す
           return NextResponse.json(
-            { ok: false, error: 'failed to update embedding_jobs to failed', details: supabaseErrorToJson(jobFailErr) },
+            { ok: false, error: 'failed to update company_embedding_jobs to failed', details: supabaseErrorToJson(jobFailErr) },
             { status: 500 }
           );
         }
@@ -449,7 +412,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (e: any) {
-    console.error('[batch/embeddings/run] fatal:', e);
+    console.error('[batch/company-embeddings/run] fatal:', e);
     return NextResponse.json({ ok: false, error: e?.message ?? 'server error' }, { status: 500 });
   }
 }

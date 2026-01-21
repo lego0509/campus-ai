@@ -281,7 +281,7 @@ const tools: OpenAI.Responses.Tool[] = [
   {
     type: 'function',
     name: 'list_companies_by_university',
-    description: '指定大学（+学部）の company_reviews から会社一覧を返す。',
+    description: '指定大学（+学部）の company_rollups から会社一覧を返す。',
     strict: true,
     parameters: {
       type: 'object',
@@ -427,10 +427,10 @@ async function tool_list_companies_by_university(args: {
   if (!universityId) return [] as CompanyHit[];
 
   let query = supabaseAdmin
-    .from('company_reviews')
-    .select('company_id, companies(name,hq_prefecture), created_at')
+    .from('company_rollups')
+    .select('company_id, companies(name,hq_prefecture), review_count, updated_at')
     .eq('university_id', universityId)
-    .order('created_at', { ascending: false })
+    .order('review_count', { ascending: false })
     .limit(200);
 
   if (faculty) query = query.eq('faculty', faculty);
@@ -509,7 +509,7 @@ async function tool_get_company_rollup(args: {
   } else {
     const { data: rows, error } = await supabaseAdmin
       .from('company_reviews')
-      .select('outcome')
+      .select('outcome,company_review_ai_flags(ai_flagged)')
       .eq('university_id', universityId)
       .eq('faculty', faculty)
       .eq('company_id', companyId)
@@ -518,6 +518,8 @@ async function tool_get_company_rollup(args: {
     if (error) throw error;
 
     for (const r of rows || []) {
+      const flags = (r as any).company_review_ai_flags as { ai_flagged: boolean }[] | undefined;
+      if (flags?.some((f) => f.ai_flagged)) continue;
       reviewCount += 1;
       const outcome = (r as any).outcome;
       if (outcome === 'offer') countOffer += 1;
@@ -562,11 +564,12 @@ async function tool_top_companies_by_metric(args: {
     .from('company_rollups')
     .select('company_id,review_count,count_offer,count_rejected,count_other,companies!inner(name,hq_prefecture)')
     .eq('university_id', universityId)
-    .gte('review_count', minReviews);
+    .gte('review_count', minReviews)
+    .limit(200);
 
   if (faculty) query = query.eq('faculty', faculty);
 
-  const { data, error } = await query.limit(200);
+  const { data, error } = await query;
   if (error) throw error;
 
   const rows = (data || []).map((r: any) => ({
