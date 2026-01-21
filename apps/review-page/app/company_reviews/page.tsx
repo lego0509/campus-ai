@@ -83,11 +83,17 @@ const salaryBandOptions = [
   { label: '1000万円以上', value: '1000_plus' },
 ] as const;
 
-type CompanySuggestion = {
-  id: string;
-  name: string;
-  hq_prefecture: string;
-};
+function buildGradYearOptions() {
+  const now = new Date();
+  const current = now.getFullYear();
+  const start = 1990;
+  const end = current + 6;
+  const years: number[] = [];
+  for (let y = end; y >= start; y--) years.push(y);
+  return years;
+}
+
+const gradYearOptions = buildGradYearOptions();
 
 type SelectionType = (typeof selectionTypeOptions)[number]['value'];
 
@@ -111,11 +117,6 @@ export default function CompanyReviewFormPage() {
   const [lineUserId, setLineUserId] = useState<string>('');
   const [liffError, setLiffError] = useState<string>('');
   const [systemUserId, setSystemUserId] = useState<string>('');
-
-  const [companySuggestions, setCompanySuggestions] = useState<CompanySuggestion[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState<CompanySuggestion | null>(null);
-  const [companyMode, setCompanyMode] = useState<'new' | 'existing'>('new');
 
   const [form, setForm] = useState({
     university: '',
@@ -267,37 +268,6 @@ export default function CompanyReviewFormPage() {
     };
   }, [systemUserId]);
 
-  useEffect(() => {
-    const q = form.companyName.trim();
-    if (!q) {
-      setCompanySuggestions([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const res = await fetch(`/api/companies/suggest?q=${encodeURIComponent(q)}`, {
-          signal: controller.signal,
-        });
-        const json = await res.json().catch(() => ({}));
-        if (res.ok && json?.ok) {
-          setCompanySuggestions(Array.isArray(json.companies) ? json.companies : []);
-        }
-      } catch {
-        // ignore search errors
-      } finally {
-        setIsSearching(false);
-      }
-    }, 250);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [form.companyName]);
-
   const handleTextChange = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -312,18 +282,6 @@ export default function CompanyReviewFormPage() {
           : [...prev.selectionTypes, value],
       };
     });
-  };
-
-  const handleCompanyInput = (value: string) => {
-    setForm((prev) => ({ ...prev, companyName: value }));
-    setSelectedCompany(null);
-    setCompanyMode('new');
-  };
-
-  const handleSelectCompany = (company: CompanySuggestion) => {
-    setSelectedCompany(company);
-    setCompanyMode('existing');
-    setForm((prev) => ({ ...prev, companyName: company.name }));
   };
 
   const gradYearValue = useMemo(() => {
@@ -357,15 +315,10 @@ export default function CompanyReviewFormPage() {
     }
 
     if (!form.companyName.trim()) errors.companyName = '会社名を入力してください';
-    if (companyMode === 'existing' && !selectedCompany) {
-      errors.companyName = '候補から会社を選択してください';
-    }
-    if (companyMode === 'new') {
-      if (!form.hqPrefecture.trim()) {
-        errors.hqPrefecture = '本社所在地（都道府県）を選択してください';
-      } else if (!PREFECTURES.includes(form.hqPrefecture as (typeof PREFECTURES)[number])) {
-        errors.hqPrefecture = '都道府県が不正です';
-      }
+    if (!form.hqPrefecture.trim()) {
+      errors.hqPrefecture = '本社所在地（都道府県）を選択してください';
+    } else if (!PREFECTURES.includes(form.hqPrefecture as (typeof PREFECTURES)[number])) {
+      errors.hqPrefecture = '都道府県が不正です';
     }
 
     if (!form.outcome.trim()) errors.outcome = '結果を選択してください';
@@ -388,7 +341,7 @@ export default function CompanyReviewFormPage() {
     }
 
     return errors;
-  }, [companyMode, employeeCountValue, form, gradYearValue, selectedCompany]);
+  }, [employeeCountValue, form, gradYearValue]);
 
   const isFormValid = useMemo(() => Object.keys(fieldErrors).length === 0, [fieldErrors]);
 
@@ -403,11 +356,48 @@ export default function CompanyReviewFormPage() {
     setIsSubmitting(true);
 
     try {
+      let moderationResult: {
+        ai_flagged: boolean;
+        severity: number | null;
+        reason: string;
+        raw_json: Record<string, unknown>;
+      } | null = null;
+
+      {
+        const moderationRes = await fetch('/api/review-moderation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment: form.bodyMain.trim() }),
+        });
+
+        const moderationJson = await moderationRes.json().catch(() => ({}));
+
+        if (!moderationRes.ok || !moderationJson?.ok) {
+          throw new Error(
+            typeof moderationJson?.error === 'string'
+              ? moderationJson.error
+              : 'コメントの判定に失敗しました。もう一度お試しください。'
+          );
+        }
+
+        moderationResult = moderationJson.result ?? null;
+
+        if (moderationResult?.ai_flagged) {
+          const confirmSend = window.confirm(
+            `不適切なコメントの可能性があります。\n` +
+              `このまま送信しますか？\n` +
+              `（送信すると記録されます）`
+          );
+
+          if (!confirmSend) {
+            setSubmitError(moderationResult.reason || 'コメントを修正してください。');
+            return;
+          }
+        }
+      }
+
       if (!lineUserId) {
         throw new Error('LINEユーザー情報を取得できていません（LIFF未初期化 or 開発用ID未設定）');
-      }
-      if (companyMode === 'existing' && !selectedCompany) {
-        throw new Error('候補から会社を選択してください');
       }
 
       const payload = {
@@ -416,9 +406,9 @@ export default function CompanyReviewFormPage() {
         department: form.department.trim() || null,
         grad_year: gradYearValue,
 
-        company_id: companyMode === 'existing' ? selectedCompany?.id ?? null : null,
+        company_id: null,
         company_name: form.companyName.trim(),
-        hq_prefecture: companyMode === 'new' ? form.hqPrefecture.trim() : null,
+        hq_prefecture: form.hqPrefecture.trim(),
 
         outcome: form.outcome,
         result_month: form.resultMonth,
@@ -427,6 +417,13 @@ export default function CompanyReviewFormPage() {
 
         employee_count: employeeCountValue,
         annual_salary_band: form.annualSalaryBand || null,
+        ...(moderationResult?.ai_flagged
+          ? {
+              ai_flagged: true,
+              ai_severity: moderationResult.severity,
+              ai_raw_json: moderationResult.raw_json,
+            }
+          : {}),
       };
 
       const res = await fetch('/api/company-reviews', {
@@ -466,8 +463,6 @@ export default function CompanyReviewFormPage() {
         annualSalaryBand: '',
         bodyMain: '',
       }));
-      setSelectedCompany(null);
-      setCompanyMode('new');
       setShowSubmitModal(true);
     } catch (e: any) {
       setSubmitError(e?.message ?? '送信処理でエラーが発生しました');
@@ -546,14 +541,19 @@ export default function CompanyReviewFormPage() {
                   <span>卒業年</span>
                   {requiredBadge(!form.gradYear.trim() || !!fieldErrors.gradYear)}
                 </label>
-                <input
+                <select
                   id="gradYear"
                   className="control"
-                  inputMode="numeric"
-                  placeholder="例：2026"
                   value={form.gradYear}
                   onChange={(e) => handleTextChange('gradYear', e.target.value)}
-                />
+                >
+                  <option value="">選択してください</option>
+                  {gradYearOptions.map((year) => (
+                    <option key={year} value={String(year)}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
                 {showErrors && fieldErrors.gradYear ? (
                   <p className="text-xs text-red-600">{fieldErrors.gradYear}</p>
                 ) : (
@@ -563,7 +563,7 @@ export default function CompanyReviewFormPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="会社情報" subtitle="会社名はサジェストから選択できます">
+          <SectionCard title="会社情報" subtitle="正式な会社名を入力してください">
             <div className="grid gap-4">
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="companyName">
@@ -575,78 +575,33 @@ export default function CompanyReviewFormPage() {
                   className="control"
                   placeholder="例：サンプル株式会社"
                   value={form.companyName}
-                  onChange={(e) => handleCompanyInput(e.target.value)}
+                  onChange={(e) => handleTextChange('companyName', e.target.value)}
                 />
                 {showErrors && fieldErrors.companyName ? (
                   <p className="text-xs text-red-600">{fieldErrors.companyName}</p>
                 ) : (
-                  <p className="text-xs text-gray-500">部分一致で候補が表示されます</p>
+                  <p className="text-xs text-gray-500">正式名称で入力してください</p>
                 )}
               </div>
-
-              {form.companyName.trim().length > 0 ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>検索結果</span>
-                    {isSearching ? <span>検索中...</span> : null}
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-white">
-                    {companySuggestions.length > 0 ? (
-                      <ul className="divide-y divide-slate-100">
-                        {companySuggestions.map((company) => (
-                          <li key={company.id}>
-                            <button
-                              type="button"
-                              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
-                              onClick={() => handleSelectCompany(company)}
-                            >
-                              <span className="font-semibold text-gray-900">{company.name}</span>
-                              <span className="ml-2 text-xs text-gray-500">{company.hq_prefecture}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="px-3 py-3 text-sm text-gray-500">該当する会社がありません</div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs text-brand-600 hover:text-brand-700"
-                    onClick={() => {
-                      setSelectedCompany(null);
-                      setCompanyMode('new');
-                    }}
-                  >
-                    新規会社として登録する
-                  </button>
-                </div>
-              ) : null}
 
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="hqPrefecture">
                   <span>本社所在地（都道府県）</span>
-                  {requiredBadge(companyMode === 'new' && !form.hqPrefecture.trim())}
+                  {requiredBadge(!form.hqPrefecture.trim())}
                 </label>
-                {companyMode === 'existing' && selectedCompany ? (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-gray-700">
-                    {selectedCompany.hq_prefecture}
-                  </div>
-                ) : (
-                  <select
-                    id="hqPrefecture"
-                    className="control"
-                    value={form.hqPrefecture}
-                    onChange={(e) => handleTextChange('hqPrefecture', e.target.value)}
-                  >
-                    <option value="">都道府県を選択</option>
-                    {PREFECTURES.map((pref) => (
-                      <option key={pref} value={pref}>
-                        {pref}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <select
+                  id="hqPrefecture"
+                  className="control"
+                  value={form.hqPrefecture}
+                  onChange={(e) => handleTextChange('hqPrefecture', e.target.value)}
+                >
+                  <option value="">都道府県を選択</option>
+                  {PREFECTURES.map((pref) => (
+                    <option key={pref} value={pref}>
+                      {pref}
+                    </option>
+                  ))}
+                </select>
                 {showErrors && fieldErrors.hqPrefecture ? (
                   <p className="text-xs text-red-600">{fieldErrors.hqPrefecture}</p>
                 ) : null}

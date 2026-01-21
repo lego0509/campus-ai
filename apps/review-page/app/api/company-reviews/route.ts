@@ -90,6 +90,10 @@ type Payload = {
 
   employee_count?: number | null;
   annual_salary_band?: SalaryBandCode | null;
+
+  ai_flagged?: boolean;
+  ai_severity?: number | null;
+  ai_raw_json?: Record<string, unknown> | null;
 };
 
 function supabaseErrorToJson(err: any) {
@@ -373,6 +377,29 @@ export async function POST(req: Request) {
     }
 
     insertedReviewId = inserted.id;
+
+    // ----------------------------
+    // 6) company_review_ai_flags（任意）
+    // ----------------------------
+    if (body.ai_flagged) {
+      const { error: flagErr } = await supabaseAdmin.from('company_review_ai_flags').insert({
+        review_id: insertedReviewId,
+        ai_flagged: true,
+        category: null,
+        severity: body.ai_severity ?? null,
+        raw_json: body.ai_raw_json ?? null,
+      });
+
+      if (flagErr) {
+        await supabaseAdmin.from('company_reviews').delete().eq('id', insertedReviewId);
+        insertedReviewId = null;
+
+        return NextResponse.json(
+          { error: 'failed to insert company_review_ai_flags', details: supabaseErrorToJson(flagErr) },
+          { status: 500 }
+        );
+      }
+    }
 
     // ----------------------------
     // 7) company_embedding_jobs を queued で積む
