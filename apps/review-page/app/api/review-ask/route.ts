@@ -552,7 +552,7 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
   if (noCredit === null || creditNormal === null || creditHigh === null || notRated === null) {
     const { data: perfRows, error: perfErr } = await supabaseAdmin
       .from('course_reviews')
-      .select('performance_self')
+      .select('performance_self,course_review_ai_flags(ai_flagged)')
       .eq('subject_id', subjectId)
       .limit(5000);
 
@@ -564,6 +564,8 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
     let _creditHigh = 0;
 
     for (const r of perfRows || []) {
+      const flags = (r as any).course_review_ai_flags as { ai_flagged: boolean }[] | undefined;
+      if (flags?.some((f) => f.ai_flagged)) continue;
       const v = (r as any).performance_self as number;
       if (v === 1) _notRated += 1;
       else if (v === 2) _noCredit += 1;
@@ -730,24 +732,29 @@ async function tool_top_subjects_with_examples(args: {
     const subjectId = r.subject_id as string;
     const { data: reviews, error: revErr } = await supabaseAdmin
       .from('course_reviews')
-      .select('body_main,satisfaction,recommendation,created_at')
+      .select('body_main,satisfaction,recommendation,created_at,course_review_ai_flags(ai_flagged)')
       .eq('subject_id', subjectId)
       .gte('satisfaction', 4)
       .gte('recommendation', 4)
       .order('created_at', { ascending: false })
-      .limit(sampleCount);
+      .limit(sampleCount * 5);
 
     if (revErr) throw revErr;
 
     const subjectName = (r as any)?.subjects?.name ?? null;
     const metricValue = roundOneDecimal((r as Record<string, unknown>)[args.metric] ?? null);
+    const clean = (reviews || []).filter((x: any) => {
+      const flags = x.course_review_ai_flags as { ai_flagged: boolean }[] | undefined;
+      return !flags?.some((f) => f.ai_flagged);
+    });
+
     results.push({
       subject_id: subjectId,
       subject_name: subjectName,
       review_count: r.review_count,
       metric_value: metricValue,
       metric: args.metric,
-      examples: (reviews || []).map((x: any) => ({
+      examples: clean.slice(0, sampleCount).map((x: any) => ({
         body_main: x.body_main,
         satisfaction: x.satisfaction,
         recommendation: x.recommendation,
