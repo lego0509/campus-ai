@@ -18,7 +18,9 @@ export const config = { api: { bodyParser: false } };
 // LINE_CHANNEL_ACCESS_TOKEN
 // OPENAI_API_KEY
 // （任意）OPENAI_MODEL          : 雑談と要約更新に使うモデル（例 gpt-4o-mini）
-// （必須）ASK_API_URL           : 例 https://review-page-gules.vercel.app/api/ask
+// （必須）ASK_REVIEW_API_URL    : 例 https://review-page-gules.vercel.app/api/review-ask
+// （必須）ASK_COMPANY_API_URL   : 例 https://review-page-gules.vercel.app/api/company-ask
+// （任意）ASK_API_URL           : 旧互換（review-askの代替として使う）
 // （任意）ASK_TIMEOUT_MS        : /api/ask タイムアウト(ms) 既定 45000
 // （任意）DEBUG_WEBHOOK         : 1 でログ多め
 
@@ -254,7 +256,7 @@ async function maybeUpdateUserSummary(openai, userId) {
  * どの質問を /api/ask に回すか（雑でもOK。足りなければ後で足す）
  * ※「大学/授業/おすすめ/難しい/単位/出席/課題/ランキング」系は ask へ
  */
-function shouldUseAsk(userMessage) {
+function shouldUseReviewAsk(userMessage) {
   const t = (userMessage || "").toLowerCase();
   const keywords = [
     "大学",
@@ -274,20 +276,16 @@ function shouldUseAsk(userMessage) {
     "ランキング",
     "トップ",
     "平均",
-    "就活",
-    "企業",
-    "インターン",
   ];
   return keywords.some((k) => t.includes(k));
 }
 
 /**
- * /api/ask を叩いて “DB根拠の回答” を取得
+ * /api/review-ask / api/company-ask を叩いて “DB根拠の回答” を取得
  * - 45秒でタイムアウト（replyToken対策）
  */
-async function callAskApi(lineUserId, message) {
-  const url = process.env.ASK_API_URL;
-  if (!url) throw new Error("ASK_API_URL is not set");
+async function callAskApi(url, lineUserId, message) {
+  if (!url) throw new Error("ASK API URL is not set");
 
   const payload = { line_user_id: lineUserId, message };
 
@@ -336,6 +334,12 @@ async function callAskApi(lineUserId, message) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function shouldUseCompanyAsk(userMessage) {
+  const t = (userMessage || "").toLowerCase();
+  const keywords = ["会社", "企業", "就活", "内定", "選考", "面接", "es", "インターン", "年収", "給与"];
+  return keywords.some((k) => t.includes(k));
 }
 
 /**
@@ -447,12 +451,20 @@ export default async function handler(req, res) {
       let replyText = "";
 
       try {
-        // A) 授業/科目/大学系 → /api/ask に回してDB根拠の回答
-        if (shouldUseAsk(userMessage)) {
-          if (process.env.DEBUG_WEBHOOK === "1") console.log("[webhook] -> ask");
-          replyText = await callAskApi(lineUserId, userMessage);
+        // A) 企業/就活系 → /api/company-ask
+        if (shouldUseCompanyAsk(userMessage)) {
+          const companyUrl = process.env.ASK_COMPANY_API_URL;
+          if (!companyUrl) throw new Error("ASK_COMPANY_API_URL is not set");
+          if (process.env.DEBUG_WEBHOOK === "1") console.log("[webhook] -> company-ask");
+          replyText = await callAskApi(companyUrl, lineUserId, userMessage);
+        } else if (shouldUseReviewAsk(userMessage)) {
+          // B) 授業/科目/大学系 → /api/review-ask
+          const reviewUrl = process.env.ASK_REVIEW_API_URL || process.env.ASK_API_URL;
+          if (!reviewUrl) throw new Error("ASK_REVIEW_API_URL is not set");
+          if (process.env.DEBUG_WEBHOOK === "1") console.log("[webhook] -> review-ask");
+          replyText = await callAskApi(reviewUrl, lineUserId, userMessage);
         } else {
-          // B) 雑談 → いままで通り（会話ログ＋要約を使う）
+          // C) 雑談 → いままで通り（会話ログ＋要約を使う）
           let recent = [];
           try {
             recent = await getRecentChatMessages(userId, 20);
@@ -466,11 +478,12 @@ export default async function handler(req, res) {
         console.error("💥 reply generation error:", e);
 
         // DB検索が必要な質問で落ちた場合は、雑談で“ごまかす”より明示的にエラー返す（幻覚防止）
-        if (shouldUseAsk(userMessage)) {
+        if (shouldUseCompanyAsk(userMessage) || shouldUseReviewAsk(userMessage)) {
           replyText =
             "DB検索に失敗しました。\n" +
             "・大学名（正式名称）\n" +
-            "・科目名（できれば正式名称）\n" +
+            "・学部名\n" +
+            "・会社名/科目名（できれば正式名称）\n" +
             "を含めて、もう一度送ってください。";
         } else {
           replyText =
