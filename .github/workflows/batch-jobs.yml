@@ -1,9 +1,9 @@
 name: Run batch jobs
 
 on:
-  #schedule:
-   # - cron: '*/3 * * * *'
-  #workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-batch:
