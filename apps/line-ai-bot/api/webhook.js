@@ -70,6 +70,25 @@ async function replyLine(replyToken, text) {
 }
 
 /**
+ * LINEのローディング表示を開始（1:1チャットのみ有効）
+ * duration は 5〜60 秒の範囲で指定
+ */
+async function startLineLoading(chatId, durationSec = 30) {
+  const duration = Math.max(5, Math.min(60, Number(durationSec) || 30));
+  await fetch("https://api.line.me/v2/bot/chat/loading/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
+      chatId,
+      loadingSeconds: duration,
+    }),
+  });
+}
+
+/**
  * users を upsert して user_id(UUID) を返す
  */
 async function upsertUserAndGetId(lineUserHash) {
@@ -430,9 +449,20 @@ export default async function handler(req, res) {
 
       const userMessage = event.message.text;
       const replyToken = event.replyToken;
+      const sourceType = event.source?.type;
 
       if (process.env.DEBUG_WEBHOOK === "1") {
         console.log("[webhook] message:", { userId, text: userMessage });
+      }
+
+      // 8.5) ローディング表示（1:1チャットのみ）
+      if (sourceType === "user") {
+        try {
+          const duration = Number(process.env.LINE_LOADING_DURATION_SEC || 30);
+          await startLineLoading(lineUserId, duration);
+        } catch (e) {
+          console.error("💥 startLineLoading error:", e);
+        }
       }
 
       // 9) user_memory を確保し、summary_1000 を取得
