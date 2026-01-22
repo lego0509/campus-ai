@@ -118,6 +118,7 @@ export async function POST(req: Request) {
           model: MODERATION_MODEL,
           output_text: outputText,
         },
+        parsed,
       };
     };
 
@@ -126,9 +127,10 @@ export async function POST(req: Request) {
         .map((f) => `[FIELD:${f.key}][LABEL:${f.label}]\n${f.value}`)
         .join('\n\n');
       const multi = await runModeration(inputText, true);
+      const parsed = (multi as any).parsed;
       const details =
-        Array.isArray((multi as any).details)
-          ? (multi as any).details
+        Array.isArray(parsed?.details)
+          ? parsed.details
               .map((d: any) => ({
                 field: String(d?.field ?? '').trim(),
                 label: String(d?.label ?? '').trim(),
@@ -147,11 +149,11 @@ export async function POST(req: Request) {
           : null;
 
       const result: ModerationResult = {
-        ai_flagged: Boolean((multi as any).ai_flagged) || flagged.length > 0,
-        severity: normalizeSeverity((multi as any).severity) ?? topSeverity,
+        ai_flagged: Boolean(parsed?.ai_flagged) || flagged.length > 0,
+        severity: normalizeSeverity(parsed?.severity) ?? topSeverity,
         reason:
-          typeof (multi as any).reason === 'string'
-            ? (multi as any).reason
+          typeof parsed?.reason === 'string'
+            ? parsed.reason
             : flagged.length > 0
               ? flagged.map((d: any) => `${d.label}: ${d.reason}`).join(' / ')
               : '問題は見つかりませんでした',

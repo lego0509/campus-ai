@@ -8,6 +8,7 @@ import StarRating from '../../components/StarRating';
 import TextCounterTextarea from '../../components/TextCounterTextarea';
 
 const MIN_COMMENT_LENGTH = 30;
+const REASON_MAX_CHARS = 60;
 
 /**
  * JSの `.length` は絵文字など（サロゲートペア）でズレることがある。
@@ -15,6 +16,11 @@ const MIN_COMMENT_LENGTH = 30;
  * （これで「フロントOKなのにDBで30未満扱い」事故が減る）
  */
 const charLen = (s: string) => Array.from(s).length;
+const truncateReason = (s: string, max = REASON_MAX_CHARS) => {
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  return chars.slice(0, Math.max(0, max - 1)).join('') + '…';
+};
 
 // 学年（DB保存値：1..6 / その他=99）
 const gradeOptions = [
@@ -98,6 +104,7 @@ export default function ReviewFormPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>('');
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showModerationModal, setShowModerationModal] = useState(false);
 
   // LIFFから取れるLINEの生userId（DBには保存しない）
   const [lineUserId, setLineUserId] = useState<string>('');
@@ -404,66 +411,71 @@ export default function ReviewFormPage() {
       } | null = null;
 
       {
-        const moderationRes = await fetch('/api/review-moderation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: [
-              { key: 'university', label: '大学名', value: form.university.trim() },
-              { key: 'faculty', label: '学部名', value: form.faculty.trim() },
-              { key: 'department', label: '学科名', value: form.department.trim() },
-              { key: 'courseName', label: '科目名', value: form.courseName.trim() },
-              {
-                key: 'teacherNames',
-                label: '教員名',
-                value: normalizedTeacherNames.join(' / '),
-              },
-              { key: 'comment', label: 'コメント', value: form.comment.trim() },
-            ],
-          }),
-        });
+        try {
+          setShowModerationModal(true);
+          const moderationRes = await fetch('/api/review-moderation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fields: [
+                { key: 'university', label: '大学名', value: form.university.trim() },
+                { key: 'faculty', label: '学部名', value: form.faculty.trim() },
+                { key: 'department', label: '学科名', value: form.department.trim() },
+                { key: 'courseName', label: '科目名', value: form.courseName.trim() },
+                {
+                  key: 'teacherNames',
+                  label: '教員名',
+                  value: normalizedTeacherNames.join(' / '),
+                },
+                { key: 'comment', label: 'コメント', value: form.comment.trim() },
+              ],
+            }),
+          });
 
-        const moderationJson = await moderationRes.json().catch(() => ({}));
+          const moderationJson = await moderationRes.json().catch(() => ({}));
 
-        if (!moderationRes.ok || !moderationJson?.ok) {
-          throw new Error(
-            typeof moderationJson?.error === 'string'
-              ? moderationJson.error
-              : 'コメントの判定に失敗しました。もう一度お試しください。'
-          );
-        }
-
-        moderationResult = moderationJson.result ?? null;
-
-        if (moderationResult?.ai_flagged) {
-          const flaggedDetails =
-            moderationResult.details?.filter((d) => d.ai_flagged) ?? [];
-          const reasonLines =
-            flaggedDetails.length > 0
-              ? flaggedDetails.map((d) => `・${d.label}: ${d.reason}`)
-              : moderationResult.reason?.trim()
-                ? [`・理由: ${moderationResult.reason.trim()}`]
-                : [];
-          const reasonText =
-            reasonLines.length > 0 ? `理由（参考）：\n${reasonLines.join('\n')}\n` : '';
-          const confirmSend = window.confirm(
-            `不適切なコメントの可能性があります。\n` +
-              `AIの自動判定のため、誤検知の可能性もあります。\n` +
-              reasonText +
-              `このまま送信しますか？\n` +
-              `（送信すると記録されます）`
-          );
-
-          if (!confirmSend) {
-            const inlineReason =
-              reasonLines.length > 0 ? reasonLines.join('\n') : moderationResult.reason || '';
-            setSubmitError(
-              inlineReason.length > 0
-                ? `不適切と判定された箇所があります。\n${inlineReason}`
-                : 'コメントを修正してください。'
+          if (!moderationRes.ok || !moderationJson?.ok) {
+            throw new Error(
+              typeof moderationJson?.error === 'string'
+                ? moderationJson.error
+                : 'コメントの判定に失敗しました。もう一度お試しください。'
             );
-            return;
           }
+
+          moderationResult = moderationJson.result ?? null;
+
+          if (moderationResult?.ai_flagged) {
+            const flaggedDetails =
+              moderationResult.details?.filter((d) => d.ai_flagged) ?? [];
+            const reasonLines =
+              flaggedDetails.length > 0
+                ? flaggedDetails.map((d) => `・${d.label}: ${truncateReason(d.reason)}`)
+                : moderationResult.reason?.trim()
+                  ? [`・${truncateReason(moderationResult.reason.trim())}`]
+                  : [];
+            const reasonText =
+              reasonLines.length > 0 ? `${reasonLines.join('\n')}\n` : '';
+            const confirmSend = window.confirm(
+              `不適切なレビューの可能性があります。\n` +
+                `AIの自動判定のため、誤検知の可能性もあります。\n` +
+                reasonText +
+                `このまま送信しますか？\n` +
+                `（送信すると記録されます）`
+            );
+
+            if (!confirmSend) {
+              const inlineReason =
+                reasonLines.length > 0 ? reasonLines.join('\n') : moderationResult.reason || '';
+              setSubmitError(
+                inlineReason.length > 0
+                  ? `不適切と判定された箇所があります。\n${inlineReason}`
+                  : 'コメントを修正してください。'
+              );
+              return;
+            }
+          }
+        } finally {
+          setShowModerationModal(false);
         }
       }
 
@@ -881,6 +893,15 @@ export default function ReviewFormPage() {
             >
               閉じる
             </button>
+          </div>
+        </div>
+      ) : null}
+      {showModerationModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
+            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-brand-100 border-t-brand-600" />
+            <p className="text-base font-semibold text-gray-900">投稿内容を検査中…</p>
+            <p className="mt-2 text-sm text-gray-600">少しだけお待ちください</p>
           </div>
         </div>
       ) : null}
