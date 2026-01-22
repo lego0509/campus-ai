@@ -6,6 +6,9 @@ import liff from '@line/liff';
 import SectionCard from '../../components/SectionCard';
 import TextCounterTextarea from '../../components/TextCounterTextarea';
 
+const MIN_COMMENT_LENGTH = 30;
+const REASON_MAX_CHARS = 60;
+
 const PREFECTURES = [
   '北海道',
   '青森県',
@@ -99,6 +102,17 @@ type SelectionType = (typeof selectionTypeOptions)[number]['value'];
 
 type FieldErrors = Record<string, string>;
 
+/**
+ * JSの `.length` は絵文字など（サロゲートペア）でズレることがある。
+ * DB側の `char_length()` と概ね揃えるため、コードポイント数で数える。
+ */
+const charLen = (s: string) => Array.from(s).length;
+const truncateReason = (s: string, max = REASON_MAX_CHARS) => {
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  return chars.slice(0, Math.max(0, max - 1)).join('') + '…';
+};
+
 export default function CompanyReviewFormPage() {
   const requiredBadge = (show: boolean, className = '') =>
     show ? (
@@ -113,6 +127,7 @@ export default function CompanyReviewFormPage() {
   const [submitError, setSubmitError] = useState<string>('');
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [showModerationModal, setShowModerationModal] = useState(false);
 
   const [lineUserId, setLineUserId] = useState<string>('');
   const [liffError, setLiffError] = useState<string>('');
@@ -328,7 +343,9 @@ export default function CompanyReviewFormPage() {
       errors.resultMonth = 'YYYY-MM形式で入力してください';
     }
 
-    if (!form.bodyMain.trim()) errors.bodyMain = '本文を入力してください';
+    if (charLen(form.bodyMain.trim()) < MIN_COMMENT_LENGTH) {
+      errors.bodyMain = `本文は${MIN_COMMENT_LENGTH}文字以上で入力してください`;
+    }
 
     if (employeeCountValue !== null) {
       if (!Number.isFinite(employeeCountValue) || employeeCountValue <= 0) {
@@ -361,38 +378,76 @@ export default function CompanyReviewFormPage() {
         severity: number | null;
         reason: string;
         raw_json: Record<string, unknown>;
+        details?: {
+          field: string;
+          label: string;
+          ai_flagged: boolean;
+          severity: number | null;
+          reason: string;
+        }[];
       } | null = null;
 
       {
-        const moderationRes = await fetch('/api/review-moderation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comment: form.bodyMain.trim() }),
-        });
+        try {
+          setShowModerationModal(true);
+          const moderationRes = await fetch('/api/review-moderation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fields: [
+                { key: 'university', label: '大学名', value: form.university.trim() },
+                { key: 'faculty', label: '学部名', value: form.faculty.trim() },
+                { key: 'department', label: '学科名', value: form.department.trim() },
+                { key: 'companyName', label: '会社名', value: form.companyName.trim() },
+                { key: 'bodyMain', label: '本文', value: form.bodyMain.trim() },
+              ],
+            }),
+          });
 
-        const moderationJson = await moderationRes.json().catch(() => ({}));
+          const moderationJson = await moderationRes.json().catch(() => ({}));
 
-        if (!moderationRes.ok || !moderationJson?.ok) {
-          throw new Error(
-            typeof moderationJson?.error === 'string'
-              ? moderationJson.error
-              : 'コメントの判定に失敗しました。もう一度お試しください。'
-          );
-        }
-
-        moderationResult = moderationJson.result ?? null;
-
-        if (moderationResult?.ai_flagged) {
-          const confirmSend = window.confirm(
-            `不適切なコメントの可能性があります。\n` +
-              `このまま送信しますか？\n` +
-              `（送信すると記録されます）`
-          );
-
-          if (!confirmSend) {
-            setSubmitError(moderationResult.reason || 'コメントを修正してください。');
-            return;
+          if (!moderationRes.ok || !moderationJson?.ok) {
+            throw new Error(
+              typeof moderationJson?.error === 'string'
+                ? moderationJson.error
+                : 'コメントの判定に失敗しました。もう一度お試しください。'
+            );
           }
+
+          moderationResult = moderationJson.result ?? null;
+
+          if (moderationResult?.ai_flagged) {
+            const flaggedDetails =
+              moderationResult.details?.filter((d) => d.ai_flagged) ?? [];
+            const reasonLines =
+              flaggedDetails.length > 0
+                ? flaggedDetails.map((d) => `・${d.label}: ${truncateReason(d.reason)}`)
+                : moderationResult.reason?.trim()
+                  ? [`・${truncateReason(moderationResult.reason.trim())}`]
+                  : [];
+            const reasonText =
+              reasonLines.length > 0 ? `${reasonLines.join('\n')}\n` : '';
+            const confirmSend = window.confirm(
+              `不適切なレビューの可能性があります。\n` +
+                `AIの自動判定のため、誤検知の可能性もあります。\n` +
+                reasonText +
+                `このまま送信しますか？\n` +
+                `（送信すると記録されます）`
+            );
+
+            if (!confirmSend) {
+              const inlineReason =
+                reasonLines.length > 0 ? reasonLines.join('\n') : moderationResult.reason || '';
+              setSubmitError(
+                inlineReason.length > 0
+                  ? `不適切と判定された箇所があります。\n${inlineReason}`
+                  : 'コメントを修正してください。'
+              );
+              return;
+            }
+          }
+        } finally {
+          setShowModerationModal(false);
         }
       }
 
@@ -726,12 +781,12 @@ export default function CompanyReviewFormPage() {
               label={
                 <span className="flex items-center">
                   本文
-                  {requiredBadge(!form.bodyMain.trim(), 'ml-2')}
+                  {requiredBadge(charLen(form.bodyMain.trim()) < MIN_COMMENT_LENGTH, 'ml-2')}
                 </span>
               }
               value={form.bodyMain}
               onChange={(val) => handleTextChange('bodyMain', val)}
-              minLength={1}
+              minLength={MIN_COMMENT_LENGTH}
               placeholder="例：ESは比較的短めで、面接は2回でした。GDは時間が短くて忙しかったです。"
             />
             {showErrors && fieldErrors.bodyMain ? (
@@ -763,6 +818,15 @@ export default function CompanyReviewFormPage() {
             >
               閉じる
             </button>
+          </div>
+        </div>
+      ) : null}
+      {showModerationModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
+            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-brand-100 border-t-brand-600" />
+            <p className="text-base font-semibold text-gray-900">投稿内容を検査中…</p>
+            <p className="mt-2 text-sm text-gray-600">少しだけお待ちください</p>
           </div>
         </div>
       ) : null}
