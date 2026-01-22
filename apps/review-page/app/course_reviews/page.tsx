@@ -394,13 +394,33 @@ export default function ReviewFormPage() {
         severity: number | null;
         reason: string;
         raw_json: Record<string, unknown>;
+        details?: {
+          field: string;
+          label: string;
+          ai_flagged: boolean;
+          severity: number | null;
+          reason: string;
+        }[];
       } | null = null;
 
       {
         const moderationRes = await fetch('/api/review-moderation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comment: form.comment.trim() }),
+          body: JSON.stringify({
+            fields: [
+              { key: 'university', label: '大学名', value: form.university.trim() },
+              { key: 'faculty', label: '学部名', value: form.faculty.trim() },
+              { key: 'department', label: '学科名', value: form.department.trim() },
+              { key: 'courseName', label: '科目名', value: form.courseName.trim() },
+              {
+                key: 'teacherNames',
+                label: '教員名',
+                value: normalizedTeacherNames.join(' / '),
+              },
+              { key: 'comment', label: 'コメント', value: form.comment.trim() },
+            ],
+          }),
         });
 
         const moderationJson = await moderationRes.json().catch(() => ({}));
@@ -416,14 +436,32 @@ export default function ReviewFormPage() {
         moderationResult = moderationJson.result ?? null;
 
         if (moderationResult?.ai_flagged) {
+          const flaggedDetails =
+            moderationResult.details?.filter((d) => d.ai_flagged) ?? [];
+          const reasonLines =
+            flaggedDetails.length > 0
+              ? flaggedDetails.map((d) => `・${d.label}: ${d.reason}`)
+              : moderationResult.reason?.trim()
+                ? [`・理由: ${moderationResult.reason.trim()}`]
+                : [];
+          const reasonText =
+            reasonLines.length > 0 ? `理由（参考）：\n${reasonLines.join('\n')}\n` : '';
           const confirmSend = window.confirm(
             `不適切なコメントの可能性があります。\n` +
+              `AIの自動判定のため、誤検知の可能性もあります。\n` +
+              reasonText +
               `このまま送信しますか？\n` +
               `（送信すると記録されます）`
           );
 
           if (!confirmSend) {
-            setSubmitError(moderationResult.reason || 'コメントを修正してください。');
+            const inlineReason =
+              reasonLines.length > 0 ? reasonLines.join('\n') : moderationResult.reason || '';
+            setSubmitError(
+              inlineReason.length > 0
+                ? `不適切と判定された箇所があります。\n${inlineReason}`
+                : 'コメントを修正してください。'
+            );
             return;
           }
         }
