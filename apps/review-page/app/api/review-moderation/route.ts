@@ -28,7 +28,7 @@ function requireEnv(name: string, value?: string | null) {
 }
 
 const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', process.env.OPENAI_API_KEY);
-const MODERATION_MODEL = process.env.OPENAI_MODERATION_MODEL || 'gpt-5-mini';
+const MODERATION_MODEL = 'gpt-4o-mini';
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 function normalizeSeverity(value: unknown) {
@@ -37,6 +37,15 @@ function normalizeSeverity(value: unknown) {
   const rounded = Math.round(n);
   return Math.min(4, Math.max(1, rounded));
 }
+
+const MAX_FIELD_CHARS = 80;
+const MAX_TOTAL_CHARS = 800;
+
+const truncateText = (s: string, maxChars: number) => {
+  const chars = Array.from(s);
+  if (chars.length <= maxChars) return s;
+  return chars.slice(0, Math.max(0, maxChars - 1)).join('') + '…';
+};
 
 export async function POST(req: Request) {
   try {
@@ -69,7 +78,7 @@ export async function POST(req: Request) {
 {
   "ai_flagged": true/false,
   "severity": 1-4,
-  "reason": "短い理由"
+  "reason": "短い理由（20文字程度）"
 }
 `.trim();
 
@@ -86,9 +95,9 @@ export async function POST(req: Request) {
 {
   "ai_flagged": true/false,
   "severity": 1-4,
-  "reason": "短い総評理由（任意）",
+  "reason": "短い総評理由（任意・20文字程度）",
   "details": [
-    { "field": "key", "label": "表示名", "ai_flagged": true/false, "severity": 1-4, "reason": "短い理由" }
+    { "field": "key", "label": "表示名", "ai_flagged": true/false, "severity": 1-4, "reason": "短い理由（20文字程度）" }
   ]
 }
 `.trim();
@@ -123,9 +132,14 @@ export async function POST(req: Request) {
     };
 
     if (normalizedFields.length > 0) {
-      const inputText = normalizedFields
+      const compactFields = normalizedFields.map((f) => ({
+        ...f,
+        value: truncateText(f.value, MAX_FIELD_CHARS),
+      }));
+      const inputText = compactFields
         .map((f) => `[FIELD:${f.key}][LABEL:${f.label}]\n${f.value}`)
-        .join('\n\n');
+        .join('\n\n')
+        .slice(0, MAX_TOTAL_CHARS);
       const multi = await runModeration(inputText, true);
       const parsed = (multi as any).parsed;
       const details =
@@ -168,7 +182,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, result });
     }
 
-    const single = await runModeration(comment!, false);
+    const safeComment = truncateText(comment!, MAX_TOTAL_CHARS);
+    const single = await runModeration(safeComment, false);
     const result: ModerationResult = {
       ai_flagged: single.ai_flagged,
       severity: single.severity,
