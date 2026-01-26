@@ -9,6 +9,7 @@ import TextCounterTextarea from '../../components/TextCounterTextarea';
 
 const MIN_COMMENT_LENGTH = 30;
 const REASON_MAX_CHARS = 60;
+const FORM_STORAGE_KEY = 'course_review_form_v1';
 
 /**
  * JSの `.length` は絵文字など（サロゲートペア）でズレることがある。
@@ -147,6 +148,38 @@ export default function ReviewFormPage() {
     // コメント
     comment: '',
   });
+
+  // ----------------------------
+  // 0) フォーム内容のローカル保存（画面を閉じても復元）
+  // ----------------------------
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FORM_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      setForm((prev) => ({
+        ...prev,
+        ...parsed,
+        teacherNames: Array.isArray(parsed.teacherNames) ? parsed.teacherNames : prev.teacherNames,
+        ratings: {
+          ...prev.ratings,
+          ...(parsed.ratings && typeof parsed.ratings === 'object' ? parsed.ratings : {}),
+        },
+      }));
+    } catch {
+      // 破損データは無視して新規入力を優先
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(form));
+    } catch {
+      // 容量不足などは無視（フォーム入力を止めない）
+    }
+  }, [form]);
 
   // ----------------------------
   // 1) LIFF init（本番） / ローカルはダミーID（開発）
@@ -559,6 +592,11 @@ export default function ReviewFormPage() {
         ),
         comment: '',
       }));
+      try {
+        localStorage.removeItem(FORM_STORAGE_KEY);
+      } catch {
+        // 失敗しても投稿完了は優先
+      }
       setShowSubmitModal(true);
     } catch (e: any) {
       setSubmitError(e?.message ?? '送信処理でエラーが発生しました');
