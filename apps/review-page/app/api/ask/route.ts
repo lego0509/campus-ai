@@ -1040,7 +1040,9 @@ export async function POST(req: Request) {
     ok: true,
     user_id: userId,
     answer: r.answer,
-    ...(debug ? { debug: { forced_tool: r.forced, tool_calls: r.toolTrace } } : {}),
+    ...(debug
+      ? { debug: { forced_tool: r.forced, tool_calls: r.toolTrace, version: 'force-tool-2026-01-26' } }
+      : {}),
   });
 
   } catch (e: any) {
