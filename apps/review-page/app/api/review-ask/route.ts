@@ -231,6 +231,46 @@ function supabaseErrorToJson(err: any) {
   return { message: err.message, code: err.code, details: err.details, hint: err.hint };
 }
 
+function normalizeTextForSearch(input: string) {
+  return input.replace(/\s+/g, '').trim();
+}
+
+function extractUniversityName(message: string) {
+  const match = message.match(/([^\s]+?大学)/);
+  return match?.[1]?.trim() ?? null;
+}
+
+function extractUniversityFromMessages(messages: { role: string; content: string }[]) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const text = messages[i]?.content ?? '';
+    const match = text.match(/([^\s]+?大学)/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return null;
+}
+
+function extractSubjectKeyword(message: string) {
+  const avoid = ['おすすめ', 'ランキング', '一覧', '人気', 'どんな科目'];
+  if (avoid.some((k) => message.includes(k))) return null;
+  let s = message.trim();
+  s = s.replace(/[「」『』"'“”]/g, '');
+  s = s.replace(/について.*$/, '');
+  s = s.replace(/詳しく.*$/, '');
+  s = s.replace(/教えて.*$/, '');
+  s = s.replace(/どう.*$/, '');
+  s = s.replace(/どんな.*$/, '');
+  s = s.replace(/の?科目.*$/, '');
+  s = s.replace(/って$/, '');
+  s = normalizeTextForSearch(s);
+  if (s.length < 2 || s.length > 30) return null;
+  return s;
+}
+
+function formatPercent(numerator: number, denom: number) {
+  if (denom <= 0) return null;
+  return Math.round((numerator / denom) * 1000) / 10;
+}
+
 async function getUserMemorySummary(userId: string) {
   const { data, error } = await supabaseAdmin
     .from('user_memory')
@@ -288,6 +328,69 @@ async function getOrCreateUserId(lineUserId: string) {
 
   if (insErr) throw insErr;
   return inserted.id as string;
+}
+
+async function getAffiliationUniversityId(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('user_affiliations')
+    .select('university_id,universities(name)')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.university_id) return null;
+  return {
+    id: data.university_id as string,
+    name: (data as any).universities?.name ?? null,
+  };
+}
+
+async function searchSubjectsWithRollup(universityId: string, keyword: string, limit = 3) {
+  const { data, error } = await supabaseAdmin
+    .from('subjects')
+    .select('id,name,university_id')
+    .eq('university_id', universityId)
+    .ilike('name', `%${keyword}%`)
+    .order('name', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as SubjectHit[];
+}
+
+function formatSubjectSummary(input: {
+  subjectName: string | null;
+  universityName: string | null;
+  rollup: RollupRow | null;
+  credit: { not_rated: number; no_credit: number; credit_normal: number; credit_high: number };
+}) {
+  const name = input.subjectName ?? '科目名不明';
+  const uni = input.universityName ? `（${input.universityName}）` : '';
+  const r = input.rollup;
+
+  if (!r || r.review_count === 0) {
+    return `・${name}${uni}\n  データ不足のため集計中`;
+  }
+
+  const denom =
+    input.credit.not_rated +
+    input.credit.no_credit +
+    input.credit.credit_normal +
+    input.credit.credit_high;
+  const failRate = formatPercent(input.credit.no_credit, denom);
+
+  const lines = [
+    `・${name}${uni}`,
+    `  レビュー数: ${r.review_count}`,
+    `  満足度: ${r.avg_satisfaction ?? '不明'} / おすすめ度: ${r.avg_recommendation ?? '不明'}`,
+    `  難易度: ${r.avg_class_difficulty ?? '不明'} / 単位の取りやすさ: ${r.avg_credit_ease ?? '不明'}`,
+    `  課題量: ${r.avg_assignment_load ?? '不明'} / 出席の厳しさ: ${r.avg_attendance_strictness ?? '不明'}`,
+    failRate === null ? `  落単率: 不明` : `  落単率: 約${failRate}%`,
+  ];
+
+  if (r.summary_1000?.trim()) {
+    lines.push(`  概要: ${r.summary_1000.trim()}`);
+  }
+
+  return lines.join('\n');
 }
 
 /** ---------- tools（Function Calling）定義 ---------- */
@@ -992,6 +1095,81 @@ export async function POST(req: Request) {
 
     // users.id（内部ID）を確定
     const userId = await getOrCreateUserId(body.line_user_id);
+
+    // 個別科目の質問はDB検索を必ず通す（LLMに任せない）
+    const subjectKeyword = extractSubjectKeyword(message);
+    if (subjectKeyword) {
+      const uniNameInText = extractUniversityName(message);
+      let university: { id: string; name: string | null } | null = null;
+      let inferredFromContext = false;
+
+      if (uniNameInText) {
+        const resolved = await tool_resolve_university({ university_name: uniNameInText, limit: 5 });
+        if (resolved?.picked?.id) {
+          university = { id: resolved.picked.id, name: resolved.picked.name };
+        }
+      }
+
+      if (!university) {
+        university = await getAffiliationUniversityId(userId);
+      }
+
+      if (!university) {
+        const recent = await getRecentChatMessages(userId, 12);
+        const uniFromContext = extractUniversityFromMessages(recent);
+        if (uniFromContext) {
+          const resolved = await tool_resolve_university({
+            university_name: uniFromContext,
+            limit: 5,
+          });
+          if (resolved?.picked?.id) {
+            university = { id: resolved.picked.id, name: resolved.picked.name };
+            inferredFromContext = true;
+          }
+        }
+      }
+
+      if (!university?.id) {
+        return NextResponse.json({
+          ok: true,
+          user_id: userId,
+          answer: '大学名が分からないため教えてください。\nキャッピーのデータベースからの情報です',
+        });
+      }
+
+      const subjects = await searchSubjectsWithRollup(university.id, subjectKeyword, 3);
+      if (!subjects.length) {
+        return NextResponse.json({
+          ok: true,
+          user_id: userId,
+          answer: 'キャッピーのデータベースに情報が登録されていないため回答できません。',
+        });
+      }
+
+      const chunks: string[] = [];
+      for (const s of subjects) {
+        const rollup = await tool_get_subject_rollup({ subject_id: s.id });
+        chunks.push(
+          formatSubjectSummary({
+            subjectName: rollup.subject?.name ?? s.name,
+            universityName: rollup.subject?.university_name ?? university.name,
+            rollup: rollup.rollup,
+            credit: rollup.credit_outcomes,
+          })
+        );
+      }
+
+      const prefix = inferredFromContext && university.name
+        ? `直近の文脈から${university.name}として検索しました。\n`
+        : '';
+      const answer =
+        prefix +
+        `「${subjectKeyword}」のレビュー傾向です。\n` +
+        `${chunks.join('\n')}\n` +
+        `キャッピーのデータベースからの情報です`;
+
+      return NextResponse.json({ ok: true, user_id: userId, answer });
+    }
 
 // ここでは「会話ログ保存」は webhook 側でやる前提
   const [memorySummary, recentMessages] = await Promise.all([
