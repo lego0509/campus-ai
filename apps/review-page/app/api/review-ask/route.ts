@@ -85,11 +85,14 @@ type FunctionCallItem = {
 const PROMPT_DEVELOPER = `
 あなたは「大学授業レビューDB」を根拠に回答するアシスタント。
 必ずツールで取得した事実に基づいて答える（推測で断定しない）。
+外部の一般知識・ネット情報・想像で補完しない。ツール出力に無い内容は書かない。
 
 【絶対ルール】
 - DBに存在しない情報（一般的なネット知識）で、特定の授業/大学を断定しておすすめしない。
 - 数字（満足度/おすすめ度/難易度/単位落とす割合など）を出すときは、必ずツール結果に基づく。
 - ツール結果が無いのに「DBでは〜」と言ってはいけない。
+- ツール結果に無い講義内容・試験形式・範囲などを一般知識で書かない。
+- 情報不足の場合は「DBに情報がない/集計中」と明確に伝える。
 
 【会話制御】
 - 大学が不明で特定できないなら、まず大学を聞き返す。
@@ -150,6 +153,7 @@ const PROMPT_INSTRUCTIONS = `
 あなたは授業レビューDBに基づく回答のみ行う。
 DB参照が必要な質問では、必ず tools を呼び出してから回答する。
 ツール結果が無い場合は「大学名を教えて」など必要情報を聞き返す。
+ツール出力に含まれない内容は書かず、一般知識で補完しない。
 `;
 
 /**
@@ -885,7 +889,7 @@ async function runAgent(params: {
 }): Promise<AgentResult> {
   const { userMessage, userId, debug = false, memorySummary, recentMessages } = params;
 
-  const developerPrompt = PROMPT_DEVELOPER.trim();
+  const developerPrompt = `${PROMPT_DEVELOPER.trim()}\n\n${PROMPT_INSTRUCTIONS.trim()}`;
 
   const forced: 'auto' | 'required' = shouldForceTool(userMessage) ? 'required' : 'auto';
   const toolTrace: AgentTraceItem[] = [];
