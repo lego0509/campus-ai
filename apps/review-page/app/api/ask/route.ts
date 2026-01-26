@@ -97,6 +97,8 @@ const PROMPT_DEVELOPER = `
 - 科目が曖昧なら、search_subjects_by_name で候補を出してユーザーに選ばせる。
 - rollup が存在しない / is_dirty=true / summaryが空などの場合は「集計中/データ不足」を正直に伝える。
 - DBから必要な情報が取得できない場合は「キャッピーのデータベースに情報が登録されていない」と正直に伝える。
+- 大学名が省略され、科目名だけが来た場合は、直近の会話やメモリから大学名を推定して検索する。
+  推定した場合は「直近の文脈から◯◯大学として検索した」と短く明記する。推定できなければ大学名を聞き返す。
 - 回答には可能なら review_count と主要な平均値（満足度/おすすめ度/難易度）を添える。
 - 「単位落としてる割合」などは credit_outcomes を使って説明する（母数も書く）。
 - toolの連続呼び出しは最大2回までで完結させる。条件が揃わない場合は聞き返す。
@@ -191,7 +193,31 @@ function shouldForceTool(userMessage: string) {
     'summary',
   ];
 
-  return keywords.some((k) => t.includes(k));
+  if (keywords.some((k) => t.includes(k))) return true;
+
+  // 個別科目っぽい短文にも反応させる（科目名だけの質問対策）
+  const shortText = t.replace(/\s+/g, '');
+  if (shortText.length >= 2 && shortText.length <= 20) {
+    const subjectHints = [
+      '学',
+      '論',
+      '入門',
+      '基礎',
+      '概論',
+      '演習',
+      '実験',
+      '実習',
+      'ゼミ',
+      '研究',
+      '統計',
+      '情報',
+      '数学',
+      '英語',
+    ];
+    if (subjectHints.some((k) => shortText.includes(k))) return true;
+  }
+
+  return false;
 }
 
 /** ---------- util ---------- */
