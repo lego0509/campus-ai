@@ -157,12 +157,38 @@ DB参照が必要な質問では、必ず tools を呼び出してから回答�
  * “っぽい質問” は tool_choice='required' を使って強制する（保険）
  */
 function shouldForceTool(userMessage: string) {
-  const t = userMessage.toLowerCase();
+  const t = (userMessage || '').trim().toLowerCase();
+  if (!t) return false;
 
-  // 雑でも効果が高いキーワード群（あなたのドメインに合わせて足してOK）
+  // Casual topics that should not force DB tools.
+  const casualExcludes = [
+    '天気',
+    '恋愛',
+    'バイト',
+    '雑談',
+    '人生',
+    'アプリ',
+    'スマホ',
+    'ゲーム',
+    '映画',
+    '音楽',
+    'グルメ',
+    '旅行',
+    'スポーツ',
+  ];
+  if (casualExcludes.some((k) => t.includes(k))) return false;
+
+  // Strong intent patterns: "Aについて教えて" / "Aってどう？" / "詳しく教えて"
+  const forcePatterns = [/について教えて/, /詳しく教えて/, /ってどう\??$/, /ってどんな/];
+  if (forcePatterns.some((re) => re.test(t))) return true;
+
+  // High-signal keywords (DB-required topics)
   const keywords = [
     '授業',
     '科目',
+    '講義',
+    'シラバス',
+    'カリキュラム',
     'おすすめ',
     'レビュー',
     '満足',
@@ -170,6 +196,9 @@ function shouldForceTool(userMessage: string) {
     '難易度',
     '出席',
     '課題',
+    'レポート',
+    'テスト',
+    '試験',
     '単位',
     '落と',
     'トップ',
@@ -192,12 +221,11 @@ function shouldForceTool(userMessage: string) {
     'rollup',
     'summary',
   ];
-
   if (keywords.some((k) => t.includes(k))) return true;
 
-  // 個別科目っぽい短文にも反応させる（科目名だけの質問対策）
+  // Short subject-like questions: force DB even if keywords are minimal.
   const shortText = t.replace(/\s+/g, '');
-  if (shortText.length >= 2 && shortText.length <= 20) {
+  if (shortText.length >= 2 && shortText.length <= 25) {
     const subjectHints = [
       '学',
       '論',
@@ -213,6 +241,14 @@ function shouldForceTool(userMessage: string) {
       '情報',
       '数学',
       '英語',
+      '物理',
+      '化学',
+      '経済',
+      '法学',
+      '心理',
+      'プログラミング',
+      'について',
+      '教えて',
     ];
     if (subjectHints.some((k) => shortText.includes(k))) return true;
   }
