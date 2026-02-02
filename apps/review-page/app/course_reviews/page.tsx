@@ -6,7 +6,6 @@ import liff from '@line/liff';
 import SectionCard from '../../components/SectionCard';
 import StarRating from '../../components/StarRating';
 import TextCounterTextarea from '../../components/TextCounterTextarea';
-import { getPublicEnv } from '@/lib/env';
 
 const MIN_COMMENT_LENGTH = 30;
 const REASON_MAX_CHARS = 60;
@@ -213,17 +212,15 @@ export default function ReviewFormPage() {
       try {
         // ローカル(PCブラウザ)ではLIFFが成立しないことが多いので、開発用IDを優先
         if (process.env.NODE_ENV === 'development') {
-          const devId = getPublicEnv('DEV_LINE_USER_ID');
+          const devId = process.env.NEXT_PUBLIC_DEV_LINE_USER_ID;
           if (devId && !canceled) {
             setLineUserId(devId);
             return;
           }
         }
 
-        const liffId = getPublicEnv('LIFF_ID');
-        if (!liffId) {
-          throw new Error('NEXT_PUBLIC_TEST_LIFF_ID or NEXT_PUBLIC_LIFF_ID is not set');
-        }
+        const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+        if (!liffId) throw new Error('NEXT_PUBLIC_LIFF_ID is not set');
 
         await liff.init({ liffId });
 

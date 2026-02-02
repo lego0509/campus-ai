@@ -5,7 +5,6 @@ import liff from '@line/liff';
 
 import SectionCard from '../../components/SectionCard';
 import TextCounterTextarea from '../../components/TextCounterTextarea';
-import { getPublicEnv } from '@/lib/env';
 
 const MIN_COMMENT_LENGTH = 30;
 const REASON_MAX_CHARS = 60;
@@ -159,16 +158,17 @@ export default function CompanyReviewFormPage() {
     const init = async () => {
       try {
         if (process.env.NODE_ENV === 'development') {
-          const devId = getPublicEnv('DEV_LINE_USER_ID');
+          const devId = process.env.NEXT_PUBLIC_DEV_LINE_USER_ID;
           if (devId && !canceled) {
             setLineUserId(devId);
             return;
           }
         }
 
-        const liffId = getPublicEnv('LIFF_ID_COMPANY') || getPublicEnv('LIFF_ID');
+        const liffId =
+          process.env.NEXT_PUBLIC_LIFF_ID_COMPANY || process.env.NEXT_PUBLIC_LIFF_ID;
         if (!liffId) {
-          throw new Error('NEXT_PUBLIC_LIFF_ID_COMPANY or NEXT_PUBLIC_LIFF_ID is not set');
+          throw new Error('NEXT_PUBLIC_LIFF_ID_COMPANY is not set');
         }
 
         await liff.init({ liffId });
