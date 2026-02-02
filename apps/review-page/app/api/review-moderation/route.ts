@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getEnv } from '@/lib/env';
 
 type ModerationPayload = {
   comment?: string;
@@ -27,8 +28,8 @@ function requireEnv(name: string, value?: string | null) {
   return value;
 }
 
-const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', process.env.OPENAI_API_KEY);
-const MODERATION_MODEL = 'gpt-4o-mini';
+const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', getEnv('OPENAI_API_KEY'));
+const MODERATION_MODEL = getEnv('OPENAI_MODERATION_MODEL') || 'gpt-4o-mini';
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 function normalizeSeverity(value: unknown) {

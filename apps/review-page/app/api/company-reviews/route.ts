@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { createHmac } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 const PREFECTURES = [
   '北海道',
@@ -107,7 +108,7 @@ function supabaseErrorToJson(err: any) {
 }
 
 function lineUserIdToHash(lineUserId: string) {
-  const pepper = process.env.LINE_HASH_PEPPER;
+  const pepper = getEnv('LINE_HASH_PEPPER');
   if (!pepper) {
     throw new Error('LINE_HASH_PEPPER is not set');
   }

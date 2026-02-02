@@ -5,6 +5,7 @@ import fetch from "node-fetch";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { lineUserIdToHash } from "../lib/lineUserHash.js";
+import { getEnv } from "../lib/env.js";
 
 // Next/Vercel(API Routes)で「raw body」を読むために bodyParser を切る
 export const config = { api: { bodyParser: false } };
@@ -27,7 +28,7 @@ export const config = { api: { bodyParser: false } };
 // ==========================
 // Supabase（サーバ専用）
 // ==========================
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
 // ==========================
 // 小物関数たち
@@ -60,7 +61,7 @@ async function replyLine(replyToken, text) {
     method: "POST",
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${getEnv("LINE_CHANNEL_ACCESS_TOKEN")}`,
     },
     body: JSON.stringify({
       replyToken,
@@ -79,7 +80,7 @@ async function startLineLoading(chatId, durationSec = 30) {
     method: "POST",
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${getEnv("LINE_CHANNEL_ACCESS_TOKEN")}`,
     },
     body: JSON.stringify({
       chatId,
@@ -245,7 +246,7 @@ async function maybeUpdateUserSummary(openai, userId) {
 
   let newSummary = oldSummary;
   try {
-    const model = process.env.OPENAI_SUMMARY_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+    const model = getEnv("OPENAI_SUMMARY_MODEL") || getEnv("OPENAI_MODEL") || "gpt-4o-mini";
     const r = await openai.chat.completions.create({
       model,
       messages: prompt,
@@ -309,7 +310,7 @@ async function callAskApi(url, lineUserId, message) {
   const payload = { line_user_id: lineUserId, message };
 
   const controller = new AbortController();
-  const timeoutMs = Number(process.env.ASK_TIMEOUT_MS || 45000);
+  const timeoutMs = Number(getEnv("ASK_TIMEOUT_MS") || 45000);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -365,7 +366,7 @@ function shouldUseCompanyAsk(userMessage) {
  * 通常会話（DB検索しない雑談側）
  */
 async function createChatReply(openai, mem, recent) {
-  const model = process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || "gpt-5";
+  const model = getEnv("OPENAI_CHAT_MODEL") || getEnv("OPENAI_MODEL") || "gpt-5";
 
   const systemMsg =
     "あなたは大学生活支援AIです。ユーザーの個人特定につながる情報は推測しない。短く明確に答える。";
@@ -398,7 +399,7 @@ export default async function handler(req, res) {
     const rawBody = await getRawBody(req);
 
     // 2) 署名検証
-    const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
+    const channelSecret = getEnv("LINE_CHANNEL_SECRET") || "";
     const signature = req.headers["x-line-signature"];
 
     if (!channelSecret || !signature || typeof signature !== "string") {
@@ -415,7 +416,7 @@ export default async function handler(req, res) {
     const events = data.events || [];
 
     // OpenAIクライアント（雑談/要約で使用）
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const openai = new OpenAI({ apiKey: getEnv("OPENAI_API_KEY") });
 
     // 4) eventごとに処理
     for (const event of events) {
@@ -451,14 +452,14 @@ export default async function handler(req, res) {
       const replyToken = event.replyToken;
       const sourceType = event.source?.type;
 
-      if (process.env.DEBUG_WEBHOOK === "1") {
+      if (getEnv("DEBUG_WEBHOOK") === "1") {
         console.log("[webhook] message:", { userId, text: userMessage });
       }
 
       // 8.5) ローディング表示（1:1チャットのみ）
       if (sourceType === "user") {
         try {
-          const duration = Number(process.env.LINE_LOADING_DURATION_SEC || 30);
+          const duration = Number(getEnv("LINE_LOADING_DURATION_SEC") || 30);
           await startLineLoading(lineUserId, duration);
         } catch (e) {
           console.error("💥 startLineLoading error:", e);
@@ -483,15 +484,15 @@ export default async function handler(req, res) {
       try {
         // A) 企業/就活系 → /api/company-ask
         if (shouldUseCompanyAsk(userMessage)) {
-          const companyUrl = process.env.ASK_COMPANY_API_URL;
+          const companyUrl = getEnv("ASK_COMPANY_API_URL");
           if (!companyUrl) throw new Error("ASK_COMPANY_API_URL is not set");
-          if (process.env.DEBUG_WEBHOOK === "1") console.log("[webhook] -> company-ask");
+          if (getEnv("DEBUG_WEBHOOK") === "1") console.log("[webhook] -> company-ask");
           replyText = await callAskApi(companyUrl, lineUserId, userMessage);
         } else if (shouldUseReviewAsk(userMessage)) {
           // B) 授業/科目/大学系 → /api/review-ask
-          const reviewUrl = process.env.ASK_REVIEW_API_URL || process.env.ASK_API_URL;
+          const reviewUrl = getEnv("ASK_REVIEW_API_URL") || getEnv("ASK_API_URL");
           if (!reviewUrl) throw new Error("ASK_REVIEW_API_URL is not set");
-          if (process.env.DEBUG_WEBHOOK === "1") console.log("[webhook] -> review-ask");
+          if (getEnv("DEBUG_WEBHOOK") === "1") console.log("[webhook] -> review-ask");
           replyText = await callAskApi(reviewUrl, lineUserId, userMessage);
         } else {
           // C) 雑談 → いままで通り（会話ログ＋要約を使う）

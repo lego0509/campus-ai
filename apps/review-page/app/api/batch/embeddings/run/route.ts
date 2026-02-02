@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 /**
  * ---------------------------
@@ -51,7 +52,7 @@ function requireEnv(name: string, value?: string | null) {
 
 /** バッチ用の簡易認証（GitHub Actions からの叩き専用） */
 function checkBatchAuth(req: Request) {
-  const expected = requireEnv('BATCH_TOKEN', process.env.BATCH_TOKEN);
+  const expected = requireEnv('BATCH_TOKEN', getEnv('BATCH_TOKEN'));
   const got = req.headers.get('x-batch-token') || '';
   return got === expected;
 }
@@ -59,13 +60,13 @@ function checkBatchAuth(req: Request) {
 function getOpenAIForEmbeddings() {
   // 分けたい場合：OPENAI_API_KEY_EMBEDDINGS を設定すればそちら優先
   const apiKey =
-    process.env.OPENAI_API_KEY_EMBEDDINGS || process.env.OPENAI_API_KEY || '';
+    getEnv('OPENAI_API_KEY_EMBEDDINGS') || getEnv('OPENAI_API_KEY') || '';
   requireEnv('OPENAI_API_KEY(or _EMBEDDINGS)', apiKey);
   return new OpenAI({ apiKey });
 }
 
 function getEmbeddingModel() {
-  return process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+  return getEnv('OPENAI_EMBEDDING_MODEL') || 'text-embedding-3-small';
 }
 
 // -------- DB 型（必要最低限） --------

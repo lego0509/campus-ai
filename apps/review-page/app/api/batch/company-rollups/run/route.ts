@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createHash } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 /**
  * ---------------------------
@@ -39,7 +40,7 @@ function requireEnv(name: string, value?: string | null) {
 }
 
 function checkBatchAuth(req: Request) {
-  const expected = requireEnv('BATCH_TOKEN', process.env.BATCH_TOKEN);
+  const expected = requireEnv('BATCH_TOKEN', getEnv('BATCH_TOKEN'));
   const got = req.headers.get('x-batch-token') || '';
   return got === expected;
 }
@@ -58,27 +59,27 @@ function sha256Hex(text: string) {
 }
 
 function getOpenAIForSummary() {
-  const apiKey = process.env.OPENAI_API_KEY_SUMMARY || process.env.OPENAI_API_KEY || '';
+  const apiKey = getEnv('OPENAI_API_KEY_SUMMARY') || getEnv('OPENAI_API_KEY') || '';
   requireEnv('OPENAI_API_KEY(or _SUMMARY)', apiKey);
   return new OpenAI({ apiKey });
 }
 
 function getOpenAIForRollupEmbedding() {
   const apiKey =
-    process.env.OPENAI_API_KEY_ROLLUP_EMBEDDINGS ||
-    process.env.OPENAI_API_KEY_SUMMARY ||
-    process.env.OPENAI_API_KEY ||
+    getEnv('OPENAI_API_KEY_ROLLUP_EMBEDDINGS') ||
+    getEnv('OPENAI_API_KEY_SUMMARY') ||
+    getEnv('OPENAI_API_KEY') ||
     '';
   requireEnv('OPENAI_API_KEY(or _SUMMARY or _ROLLUP_EMBEDDINGS)', apiKey);
   return new OpenAI({ apiKey });
 }
 
 function getSummaryModel() {
-  return process.env.OPENAI_SUMMARY_MODEL || 'gpt-4.1-nano';
+  return getEnv('OPENAI_SUMMARY_MODEL') || 'gpt-4.1-nano';
 }
 
 function getRollupEmbeddingModel() {
-  return process.env.OPENAI_ROLLUP_EMBEDDING_MODEL || 'text-embedding-3-small';
+  return getEnv('OPENAI_ROLLUP_EMBEDDING_MODEL') || 'text-embedding-3-small';
 }
 
 type RollupRow = {

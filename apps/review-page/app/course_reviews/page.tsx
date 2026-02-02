@@ -6,10 +6,13 @@ import liff from '@line/liff';
 import SectionCard from '../../components/SectionCard';
 import StarRating from '../../components/StarRating';
 import TextCounterTextarea from '../../components/TextCounterTextarea';
+import { getPublicEnv } from '@/lib/env';
 
 const MIN_COMMENT_LENGTH = 30;
 const REASON_MAX_CHARS = 60;
 const FORM_STORAGE_KEY = 'course_review_form_v1';
+const TAG_MAX = 5;
+const TAG_MAX_CHARS = 12;
 
 /**
  * JSの `.length` は絵文字など（サロゲートペア）でズレることがある。
@@ -21,6 +24,15 @@ const truncateReason = (s: string, max = REASON_MAX_CHARS) => {
   const chars = Array.from(s);
   if (chars.length <= max) return s;
   return chars.slice(0, Math.max(0, max - 1)).join('') + '…';
+};
+const normalizeTag = (raw: string) => {
+  const withoutFullWidthHash = raw.replace(/＃/g, '#').trim();
+  const withoutHash = withoutFullWidthHash.replace(/^#+/, '').trim();
+  const collapsed = withoutHash.replace(/\s+/g, '');
+  const lowered = collapsed.toLowerCase();
+  if (lowered.length === 0) return null;
+  if (charLen(lowered) > TAG_MAX_CHARS) return null;
+  return lowered;
 };
 
 // 学年（DB保存値：1..6 / その他=99）
@@ -47,12 +59,6 @@ const termOptions = [
   { label: 'その他', value: 'other' },
 ] as const;
 
-const requirementTypeOptions = [
-  { label: '必修', value: 'required' },
-  { label: '選択', value: 'elective' },
-  { label: '不明', value: 'unknown' },
-] as const;
-
 // 4段階：成績（DB保存値：1..4）
 const performanceOptions = [
   { label: '未評価', value: 1 },
@@ -61,21 +67,10 @@ const performanceOptions = [
   { label: '単位あり（高評価）', value: 4 },
 ] as const;
 
-// 4段階：課題の難易度（DB保存値：1..4）
-const assignmentDifficultyOptions = [
-  { label: '無し', value: 1 },
-  { label: '易', value: 2 },
-  { label: '中', value: 3 },
-  { label: '難', value: 4 },
-] as const;
-
 // 5段階評価（DB列名に合わせる）
 const assessmentOptions = [
-  { key: 'credit_ease', label: '単位取得の容易さ' },
   { key: 'class_difficulty', label: '授業の難易度（内容）' },
-  { key: 'assignment_load', label: '課題の量' },
-  { key: 'attendance_strictness', label: '出席の厳しさ' },
-  { key: 'satisfaction', label: '満足度' },
+  { key: 'assignment_difficulty_4', label: '課題の難易度' },
   { key: 'recommendation', label: 'おすすめ度' },
 ] as const;
 
@@ -106,6 +101,7 @@ export default function ReviewFormPage() {
   const [submitError, setSubmitError] = useState<string>('');
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showModerationModal, setShowModerationModal] = useState(false);
+  const [tagError, setTagError] = useState<string>('');
 
   // LIFFから取れるLINEの生userId（DBには保存しない）
   const [lineUserId, setLineUserId] = useState<string>('');
@@ -116,6 +112,8 @@ export default function ReviewFormPage() {
    * - 画面上の表示はこれに寄せる（デバッグや照合が楽）
    */
   const [systemUserId, setSystemUserId] = useState<string>('');
+  const [popularTags, setPopularTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState<string>('');
 
   // フォーム本体
   const [form, setForm] = useState({
@@ -127,17 +125,15 @@ export default function ReviewFormPage() {
 
     // 授業情報
     courseName: '',
-    teacherNames: [''] as string[], // ★UIとして入力欄は残すが、必須にはしない
+    teacherName: '',
 
     // 受講情報
-    academicYear: new Date().getFullYear(), // 必須（デフォルト今年）
-    term: '', // 必須（s1/s2/q1..）
-    creditsAtTake: '', // 必須（文字列で保持してバリデーション）
-    requirementTypeAtTake: '', // 必須（required/elective/unknown）
+    academicYear: 0, // 任意（未選択は0）
+    term: '', // 任意（s1/s2/q1..）
+    creditsAtTake: '', // 任意（文字列で保持してバリデーション）
 
     // 4段階
     performanceSelf: 0, // 1..4
-    assignmentDifficulty4: 0, // 1..4
 
     // 5段階
     ratings: assessmentOptions.reduce(
@@ -147,6 +143,7 @@ export default function ReviewFormPage() {
 
     // コメント
     comment: '',
+    hashtags: [] as string[],
   });
 
   // ----------------------------
@@ -162,7 +159,8 @@ export default function ReviewFormPage() {
       setForm((prev) => ({
         ...prev,
         ...parsed,
-        teacherNames: Array.isArray(parsed.teacherNames) ? parsed.teacherNames : prev.teacherNames,
+        teacherName: typeof parsed.teacherName === 'string' ? parsed.teacherName : prev.teacherName,
+        hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : prev.hashtags,
         ratings: {
           ...prev.ratings,
           ...(parsed.ratings && typeof parsed.ratings === 'object' ? parsed.ratings : {}),
@@ -182,6 +180,30 @@ export default function ReviewFormPage() {
   }, [form]);
 
   // ----------------------------
+  // 人気タグの取得
+  // ----------------------------
+  useEffect(() => {
+    let canceled = false;
+
+    const fetchPopularTags = async () => {
+      try {
+        const res = await fetch('/api/review-tags/popular?limit=20');
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) return;
+        const tags = Array.isArray(json.tags) ? json.tags : [];
+        if (!canceled) setPopularTags(tags.filter((t: unknown) => typeof t === 'string'));
+      } catch {
+        // 失敗してもフォームは継続
+      }
+    };
+
+    fetchPopularTags();
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  // ----------------------------
   // 1) LIFF init（本番） / ローカルはダミーID（開発）
   // ----------------------------
   useEffect(() => {
@@ -191,15 +213,17 @@ export default function ReviewFormPage() {
       try {
         // ローカル(PCブラウザ)ではLIFFが成立しないことが多いので、開発用IDを優先
         if (process.env.NODE_ENV === 'development') {
-          const devId = process.env.NEXT_PUBLIC_DEV_LINE_USER_ID;
+          const devId = getPublicEnv('DEV_LINE_USER_ID');
           if (devId && !canceled) {
             setLineUserId(devId);
             return;
           }
         }
 
-        const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-        if (!liffId) throw new Error('NEXT_PUBLIC_LIFF_ID is not set');
+        const liffId = getPublicEnv('LIFF_ID');
+        if (!liffId) {
+          throw new Error('NEXT_PUBLIC_TEST_LIFF_ID or NEXT_PUBLIC_LIFF_ID is not set');
+        }
 
         await liff.init({ liffId });
 
@@ -338,37 +362,7 @@ export default function ReviewFormPage() {
     setForm((prev) => ({ ...prev, ratings: { ...prev.ratings, [key]: value } }));
   };
 
-  const updateTeacherName = (index: number, value: string) => {
-    setForm((prev) => {
-      const next = [...prev.teacherNames];
-      next[index] = value;
-      return { ...prev, teacherNames: next };
-    });
-  };
-
-  const addTeacher = () => {
-    setForm((prev) => {
-      if (prev.teacherNames.length >= 5) return prev; // 上限
-      return { ...prev, teacherNames: [...prev.teacherNames, ''] };
-    });
-  };
-
-  const removeTeacher = (index: number) => {
-    setForm((prev) => {
-      // 1人目も削除できるようにして、空欄1つに戻す（入力欄が消えないUI）
-      const next = prev.teacherNames.filter((_, i) => i !== index);
-      return { ...prev, teacherNames: next.length ? next : [''] };
-    });
-  };
-
-  /**
-   * teacher_names は任意。
-   * - 空欄・空白は除外して送る
-   * - 最終的に空なら null を送る（DB側も許容）
-   */
-  const normalizedTeacherNames = useMemo(() => {
-    return form.teacherNames.map((t) => t.trim()).filter((t) => t.length > 0);
-  }, [form.teacherNames]);
+  const normalizedTeacherName = useMemo(() => form.teacherName.trim(), [form.teacherName]);
 
   /**
    * 単位数：空ならnull、入力があるなら整数として扱う
@@ -381,39 +375,67 @@ export default function ReviewFormPage() {
     return n;
   }, [form.creditsAtTake]);
 
-  const isCreditsValid = Number.isFinite(creditsValue) && creditsValue !== null && creditsValue > 0;
+  const isCreditsValid =
+    creditsValue === null || (Number.isFinite(creditsValue) && creditsValue > 0);
+
+  const addTag = (raw: string) => {
+    const normalized = normalizeTag(raw);
+    if (!normalized) {
+      setTagError(`タグは最大${TAG_MAX_CHARS}文字までです`);
+      return;
+    }
+    setTagError('');
+    setForm((prev) => {
+      if (prev.hashtags.includes(normalized)) return prev;
+      if (prev.hashtags.length >= TAG_MAX) {
+        setTagError(`タグは最大${TAG_MAX}個までです`);
+        return prev;
+      }
+      return { ...prev, hashtags: [...prev.hashtags, normalized] };
+    });
+  };
+
+  const addTagsFromInput = () => {
+    const raw = tagInput.trim();
+    if (!raw) return;
+    const parts = raw.replace(/＃/g, '#').replace(/#/g, ' ').split(/[\s,]+/);
+    parts.filter(Boolean).forEach((p) => addTag(p));
+    setTagInput('');
+  };
+
+  const removeTag = (tag: string) => {
+    setForm((prev) => ({ ...prev, hashtags: prev.hashtags.filter((t) => t !== tag) }));
+  };
 
   // ----------------------------
   // フォームの妥当性チェック（送信ボタンの活性/非活性）
   // ----------------------------
   const isFormValid = useMemo(() => {
     // 必須テキスト
-    const requiredText = [form.university, form.faculty, form.courseName];
+    const requiredText = [form.university, form.faculty, form.courseName, form.teacherName];
     if (!requiredText.every((v) => v.trim().length > 0)) return false;
 
     // 必須セレクト
     if (form.gradeAtTake === 0) return false;
-    if (form.term.trim().length === 0) return false;
-    if (form.requirementTypeAtTake.trim().length === 0) return false;
+    // ★学期/受講年度は任意
 
-    // ★教員名は任意なので、ここで必須判定しない
-
-    // 4段階：どちらも必須
+    // 4段階：成績は必須
     if (form.performanceSelf < 1 || form.performanceSelf > 4) return false;
-    if (form.assignmentDifficulty4 < 1 || form.assignmentDifficulty4 > 4) return false;
 
-    // 5段階：全部必須
+    // 5段階：全部必須（難易度・課題難易度・おすすめ度）
     const hasAllRatings = Object.values(form.ratings).every((val) => val >= 1 && val <= 5);
     if (!hasAllRatings) return false;
 
     // コメント長：コードポイント数で判定（絵文字対策）
     if (charLen(form.comment.trim()) < MIN_COMMENT_LENGTH) return false;
 
-    // 単位数：必須
-    if (!Number.isFinite(creditsValue) || creditsValue === null || creditsValue <= 0) return false;
+    // 単位数：任意だが入力時は正の整数
+    if (!isCreditsValid) return false;
 
     // 年度：範囲チェック
-    if (form.academicYear < 1990 || form.academicYear > 2100) return false;
+    if (form.academicYear !== 0 && (form.academicYear < 1990 || form.academicYear > 2100)) {
+      return false;
+    }
 
     return true;
   }, [form, creditsValue]);
@@ -455,11 +477,7 @@ export default function ReviewFormPage() {
                 { key: 'faculty', label: '学部名', value: form.faculty.trim() },
                 { key: 'department', label: '学科名', value: form.department.trim() },
                 { key: 'courseName', label: '科目名', value: form.courseName.trim() },
-                {
-                  key: 'teacherNames',
-                  label: '教員名',
-                  value: normalizedTeacherNames.join(' / '),
-                },
+                { key: 'teacherName', label: '教員名', value: normalizedTeacherName },
                 { key: 'comment', label: 'コメント', value: form.comment.trim() },
               ],
             }),
@@ -517,6 +535,16 @@ export default function ReviewFormPage() {
         throw new Error('LINEユーザー情報を取得できていません（LIFF未初期化 or 開発用ID未設定）');
       }
 
+      const teacherNames = normalizedTeacherName ? [normalizedTeacherName] : [];
+      const pendingParts = tagInput.trim()
+        ? tagInput.replace(/＃/g, '#').replace(/#/g, ' ').split(/[\s,]+/)
+        : [];
+      const mergedTags = [...(Array.isArray(form.hashtags) ? form.hashtags : []), ...pendingParts]
+        .map((t) => normalizeTag(String(t)))
+        .filter((t): t is string => Boolean(t))
+        .filter((t, idx, arr) => arr.indexOf(t) === idx)
+        .slice(0, TAG_MAX);
+
       // APIが受け取るsnake_case payloadに合わせて組み立てる
       const payload = {
         university_name: form.university.trim(),
@@ -526,20 +554,20 @@ export default function ReviewFormPage() {
 
         subject_name: form.courseName.trim(),
 
-        // ★教員は任意：空ならnull（route.tsでもnull扱いするが、前で揃えておく）
-        teacher_names: normalizedTeacherNames.length > 0 ? normalizedTeacherNames : null,
+        // ★教員は必須：空ならnull
+        teacher_names: teacherNames.length > 0 ? teacherNames : null,
 
-        academic_year: form.academicYear,
-        term: form.term,
-        credits_at_take: creditsValue,
-        requirement_type_at_take: form.requirementTypeAtTake,
+        academic_year: form.academicYear === 0 ? null : form.academicYear,
+        term: form.term.trim().length === 0 ? null : form.term,
+        credits_at_take: Number.isFinite(creditsValue) ? creditsValue : null,
 
         performance_self: form.performanceSelf,
-        assignment_difficulty_4: form.assignmentDifficulty4,
+        assignment_difficulty_4: form.ratings.assignment_difficulty_4,
 
         ...form.ratings,
 
         body_main: form.comment.trim(),
+        hashtags: mergedTags,
 
         ...(moderationResult?.ai_flagged
           ? {
@@ -579,19 +607,20 @@ export default function ReviewFormPage() {
       setForm((prev) => ({
         ...prev,
         courseName: '',
-        teacherNames: [''],
-        academicYear: new Date().getFullYear(),
+        teacherName: '',
+        academicYear: 0,
         term: '',
         creditsAtTake: '',
-        requirementTypeAtTake: '',
         performanceSelf: 0,
-        assignmentDifficulty4: 0,
         ratings: assessmentOptions.reduce(
           (acc, curr) => ({ ...acc, [curr.key]: 0 }),
           {} as Record<RatingKey, number>
         ),
         comment: '',
+        hashtags: [],
       }));
+      setTagInput('');
+      setTagError('');
       try {
         localStorage.removeItem(FORM_STORAGE_KEY);
       } catch {
@@ -686,7 +715,7 @@ export default function ReviewFormPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="授業情報" subtitle="科目名を入力してください（教員名は任意です）">
+          <SectionCard title="授業情報" subtitle="科目名と教員名を入力してください">
             <div className="grid gap-4">
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="courseName">
@@ -702,61 +731,35 @@ export default function ReviewFormPage() {
                 />
               </div>
 
-              <div className="space-y-3">
-                {form.teacherNames.map((name, idx) => (
-                  <div key={idx} className="grid gap-2">
-                    <div className="flex items-end justify-between gap-2">
-                      <label className="label" htmlFor={`teacher-${idx}`}>
-                        教員名（任意）
-                      </label>
-                      {form.teacherNames.length > 1 ? (
-                        <button
-                          type="button"
-                          className="text-xs text-gray-500 hover:text-gray-800"
-                          onClick={() => removeTeacher(idx)}
-                        >
-                          削除
-                        </button>
-                      ) : null}
-                    </div>
-                    <input
-                      id={`teacher-${idx}`}
-                      className="control"
-                      placeholder={idx === 0 ? '例：山田太郎（空欄OK）' : '例：共同担当の先生（任意）'}
-                      value={name}
-                      onChange={(e) => updateTeacherName(idx, e.target.value)}
-                    />
-                  </div>
-                ))}
-
-                <div>
-                  <button
-                    type="button"
-                    className="button-secondary w-full sm:w-auto"
-                    onClick={addTeacher}
-                    disabled={form.teacherNames.length >= 5}
-                  >
-                    ＋ 教員を追加（任意）
-                  </button>
-                  <p className="mt-1 text-xs text-gray-500">複数教員の場合のみ追加してください（最大5名）</p>
-                </div>
+              <div className="field-wrapper">
+                <label className="label flex items-center justify-between" htmlFor="teacherName">
+                  <span>教員名</span>
+                  {requiredBadge(form.teacherName.trim().length === 0)}
+                </label>
+                <input
+                  id="teacherName"
+                  className="control"
+                  placeholder="例：山田太郎"
+                  value={form.teacherName}
+                  onChange={(e) => handleTextChange('teacherName', e.target.value)}
+                />
               </div>
             </div>
           </SectionCard>
 
-          <SectionCard title="受講情報" subtitle="年度・学期・必修区分などを入力してください">
+          <SectionCard title="受講情報" subtitle="年度・学期・単位数（任意）">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="academicYear">
-                  <span>受講年度</span>
-                  {requiredBadge(Number.isNaN(form.academicYear))}
+                  <span>受講年度（任意）</span>
                 </label>
                 <select
                   id="academicYear"
                   className="control"
-                  value={String(form.academicYear)}
-                  onChange={(e) => handleNumberChange('academicYear', Number(e.target.value))}
+                  value={form.academicYear === 0 ? '' : String(form.academicYear)}
+                  onChange={(e) => handleNumberChange('academicYear', Number(e.target.value) || 0)}
                 >
+                  <option value="">選択しない</option>
                   {academicYearOptions.map((y) => (
                     <option key={y} value={y}>
                       {y}年度
@@ -767,8 +770,7 @@ export default function ReviewFormPage() {
 
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="term">
-                  <span>学期</span>
-                  {requiredBadge(form.term.trim().length === 0)}
+                  <span>学期（任意）</span>
                 </label>
                 <select
                   id="term"
@@ -776,7 +778,7 @@ export default function ReviewFormPage() {
                   value={form.term}
                   onChange={(e) => handleTextChange('term', e.target.value)}
                 >
-                  <option value="">学期を選択</option>
+                  <option value="">選択しない</option>
                   {termOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -787,47 +789,23 @@ export default function ReviewFormPage() {
 
               <div className="field-wrapper">
                 <label className="label flex items-center justify-between" htmlFor="creditsAtTake">
-                  <span>単位数</span>
-                  {requiredBadge(!isCreditsValid)}
+                  <span>単位数（任意）</span>
                 </label>
                 <input
                   id="creditsAtTake"
                   className="control"
                   inputMode="numeric"
-                  placeholder="例：2（任意）"
+                  placeholder="例：2"
                   value={form.creditsAtTake}
                   onChange={(e) => handleTextChange('creditsAtTake', e.target.value)}
                 />
                 <p className="mt-1 text-xs text-gray-500">正の整数で入力してください</p>
               </div>
-
-              <div className="field-wrapper">
-                <label
-                  className="label flex items-center justify-between"
-                  htmlFor="requirementTypeAtTake"
-                >
-                  <span>必修/選択</span>
-                  {requiredBadge(form.requirementTypeAtTake.trim().length === 0)}
-                </label>
-                <select
-                  id="requirementTypeAtTake"
-                  className="control"
-                  value={form.requirementTypeAtTake}
-                  onChange={(e) => handleTextChange('requirementTypeAtTake', e.target.value)}
-                >
-                  <option value="">選択してください</option>
-                  {requirementTypeOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
           </SectionCard>
 
-          <SectionCard title="成績・課題難易度" subtitle="短い選択項目をまとめています（必須）">
-            <div className="grid gap-4 sm:grid-cols-2">
+          <SectionCard title="成績" subtitle="成績の自己評価を選択してください（必須）">
+            <div className="grid gap-4 sm:grid-cols-1">
               <div className="space-y-2 text-sm text-gray-700">
                 <p className="label flex items-center justify-between">
                   <span>成績</span>
@@ -842,26 +820,6 @@ export default function ReviewFormPage() {
                       checked={form.performanceSelf === opt.value}
                       onChange={(e) => handleNumberChange('performanceSelf', Number(e.target.value))}
                       className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-400"
-                    />
-                    <span>{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="space-y-2 text-sm text-gray-700">
-                <p className="label flex items-center justify-between">
-                  <span>課題の難易度</span>
-                  {requiredBadge(form.assignmentDifficulty4 === 0)}
-                </p>
-                {assignmentDifficultyOptions.map((opt) => (
-                  <label key={opt.value} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="assignmentDifficulty4"
-                      value={opt.value}
-                      checked={form.assignmentDifficulty4 === opt.value}
-                      onChange={(e) => handleNumberChange('assignmentDifficulty4', Number(e.target.value))}
-                      className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-600"
                     />
                     <span>{opt.label}</span>
                   </label>
@@ -884,6 +842,60 @@ export default function ReviewFormPage() {
                     required
                   />
               ))}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="ハッシュタグ" subtitle="任意：特徴を短くタグ付けできます（最大5個）">
+            <div className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  className="control"
+                  placeholder="例：#高難易度 #楽単"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault();
+                      addTagsFromInput();
+                    }
+                  }}
+                />
+                <button type="button" className="button-secondary" onClick={addTagsFromInput}>
+                  追加
+                </button>
+              </div>
+              {tagError ? <p className="text-xs text-red-600">{tagError}</p> : null}
+              {form.hashtags.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {form.hashtags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 hover:bg-slate-200"
+                      onClick={() => removeTag(tag)}
+                    >
+                      #{tag} ×
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {popularTags.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">人気タグ</p>
+                  <div className="flex flex-wrap gap-2">
+                    {popularTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                        onClick={() => addTag(tag)}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </SectionCard>
 

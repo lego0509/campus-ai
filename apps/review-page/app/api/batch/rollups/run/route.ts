@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createHash } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 /**
  * ---------------------------
@@ -53,15 +54,16 @@ function requireEnv(name: string, value?: string | null) {
 }
 
 function checkBatchAuth(req: Request) {
-  const expected = requireEnv('BATCH_TOKEN', process.env.BATCH_TOKEN);
+  const expected = requireEnv('BATCH_TOKEN', getEnv('BATCH_TOKEN'));
   const got = req.headers.get('x-batch-token') || '';
   return got === expected;
 }
 
-function avg(values: number[]) {
-  if (values.length === 0) return null;
-  const s = values.reduce((a, b) => a + b, 0);
-  return s / values.length;
+function avg(values: Array<number | null | undefined>) {
+  const filtered = values.filter((v) => Number.isFinite(v as number)) as number[];
+  if (filtered.length === 0) return null;
+  const s = filtered.reduce((a, b) => a + b, 0);
+  return s / filtered.length;
 }
 
 function normalizeBodyForSummary(body: string) {
@@ -82,7 +84,7 @@ function sha256Hex(text: string) {
 
 function getOpenAIForSummary() {
   // 要約用キー：OPENAI_API_KEY_SUMMARY があれば優先
-  const apiKey = process.env.OPENAI_API_KEY_SUMMARY || process.env.OPENAI_API_KEY || '';
+  const apiKey = getEnv('OPENAI_API_KEY_SUMMARY') || getEnv('OPENAI_API_KEY') || '';
   requireEnv('OPENAI_API_KEY(or _SUMMARY)', apiKey);
   return new OpenAI({ apiKey });
 }
@@ -90,9 +92,9 @@ function getOpenAIForSummary() {
 function getOpenAIForRollupEmbedding() {
   // rollup要約embedding用キー：別に分けたいならこれを設定
   const apiKey =
-    process.env.OPENAI_API_KEY_ROLLUP_EMBEDDINGS ||
-    process.env.OPENAI_API_KEY_SUMMARY ||
-    process.env.OPENAI_API_KEY ||
+    getEnv('OPENAI_API_KEY_ROLLUP_EMBEDDINGS') ||
+    getEnv('OPENAI_API_KEY_SUMMARY') ||
+    getEnv('OPENAI_API_KEY') ||
     '';
   requireEnv('OPENAI_API_KEY(or _SUMMARY or _ROLLUP_EMBEDDINGS)', apiKey);
   return new OpenAI({ apiKey });
@@ -100,12 +102,12 @@ function getOpenAIForRollupEmbedding() {
 
 function getSummaryModel() {
   // 環境に合わせて変えてOK。未指定ならこれ。
-  return process.env.OPENAI_SUMMARY_MODEL || 'gpt-4.1-nano';
+  return getEnv('OPENAI_SUMMARY_MODEL') || 'gpt-4.1-nano';
 }
 
 function getRollupEmbeddingModel() {
   // rollups要約embedding用（DBは vector(1536) 前提なので 1536次元のモデルに揃えること）
-  return process.env.OPENAI_ROLLUP_EMBEDDING_MODEL || 'text-embedding-3-small';
+  return getEnv('OPENAI_ROLLUP_EMBEDDING_MODEL') || 'text-embedding-3-small';
 }
 
 // -------- 型（必要最低限） --------
@@ -122,12 +124,12 @@ type ReviewRow = {
   subject_id: string;
   created_at: string;
 
-  credit_ease: number;
-  class_difficulty: number;
-  assignment_load: number;
-  attendance_strictness: number;
-  satisfaction: number;
-  recommendation: number;
+  credit_ease: number | null;
+  class_difficulty: number | null;
+  assignment_load: number | null;
+  attendance_strictness: number | null;
+  satisfaction: number | null;
+  recommendation: number | null;
 };
 
 type ReviewRowWithFlags = ReviewRow & {

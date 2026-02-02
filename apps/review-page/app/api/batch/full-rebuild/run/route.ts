@@ -7,6 +7,7 @@ import { POST as runEmbeddings } from '@/app/api/batch/embeddings/run/route';
 import { POST as runRollups } from '@/app/api/batch/rollups/run/route';
 import { POST as runCompanyEmbeddings } from '@/app/api/batch/company-embeddings/run/route';
 import { POST as runCompanyRollups } from '@/app/api/batch/company-rollups/run/route';
+import { getEnv } from '@/lib/env';
 
 /**
  * -------------------------------------------
@@ -35,7 +36,7 @@ function requireEnv(name: string, value?: string | null) {
 }
 
 function checkBatchAuth(req: Request) {
-  const expected = requireEnv('BATCH_TOKEN', process.env.BATCH_TOKEN);
+  const expected = requireEnv('BATCH_TOKEN', getEnv('BATCH_TOKEN'));
   const got = req.headers.get('x-batch-token') || '';
   return got === expected;
 }
@@ -231,7 +232,7 @@ async function runEmbeddingsOnce(runner: string) {
   const req = new Request('http://localhost/api/batch/embeddings/run', {
     method: 'POST',
     headers: {
-      'x-batch-token': process.env.BATCH_TOKEN || '',
+      'x-batch-token': getEnv('BATCH_TOKEN') || '',
       'x-batch-runner': runner,
     },
   });
@@ -243,7 +244,7 @@ async function runRollupsOnce(runner: string) {
   const req = new Request('http://localhost/api/batch/rollups/run', {
     method: 'POST',
     headers: {
-      'x-batch-token': process.env.BATCH_TOKEN || '',
+      'x-batch-token': getEnv('BATCH_TOKEN') || '',
       'x-batch-runner': runner,
     },
   });
@@ -255,7 +256,7 @@ async function runCompanyEmbeddingsOnce(runner: string) {
   const req = new Request('http://localhost/api/batch/company-embeddings/run', {
     method: 'POST',
     headers: {
-      'x-batch-token': process.env.BATCH_TOKEN || '',
+      'x-batch-token': getEnv('BATCH_TOKEN') || '',
       'x-batch-runner': runner,
     },
   });
@@ -267,7 +268,7 @@ async function runCompanyRollupsOnce(runner: string) {
   const req = new Request('http://localhost/api/batch/company-rollups/run', {
     method: 'POST',
     headers: {
-      'x-batch-token': process.env.BATCH_TOKEN || '',
+      'x-batch-token': getEnv('BATCH_TOKEN') || '',
       'x-batch-runner': runner,
     },
   });

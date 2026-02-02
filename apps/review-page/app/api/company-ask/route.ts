@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createHmac } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 /**
  * ---------------------------------------
@@ -25,15 +26,15 @@ function requireEnv(name: string, value?: string | null) {
   return value;
 }
 
-const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', process.env.OPENAI_API_KEY);
-const QA_MODEL = process.env.OPENAI_QA_MODEL || 'gpt-5';
-const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', process.env.LINE_HASH_PEPPER);
+const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', getEnv('OPENAI_API_KEY'));
+const QA_MODEL = getEnv('OPENAI_QA_MODEL') || 'gpt-5';
+const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', getEnv('LINE_HASH_PEPPER'));
 
 /**
  * ASK_DEBUG=1 なら、レスポンスに tool 呼び出し履歴を載せる（LINE運用では 0 推奨）
  * もしくは header x-ask-debug: 1 で強制ON
  */
-const ASK_DEBUG = process.env.ASK_DEBUG === '1';
+const ASK_DEBUG = getEnv('ASK_DEBUG') === '1';
 
 /** ---------- OpenAI client ---------- */
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });

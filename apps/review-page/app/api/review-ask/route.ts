@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createHmac } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 /**
  * ---------------------------------------
@@ -25,15 +26,15 @@ function requireEnv(name: string, value?: string | null) {
   return value;
 }
 
-const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', process.env.OPENAI_API_KEY);
-const QA_MODEL = process.env.OPENAI_QA_MODEL || 'gpt-5';
-const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', process.env.LINE_HASH_PEPPER);
+const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', getEnv('OPENAI_API_KEY'));
+const QA_MODEL = getEnv('OPENAI_QA_MODEL') || 'gpt-5';
+const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', getEnv('LINE_HASH_PEPPER'));
 
 /**
  * ASK_DEBUG=1 なら、レスポンスに tool 呼び出し履歴を載せる（LINE運用では 0 推奨）
  * もしくは header x-ask-debug: 1 で強制ON
  */
-const ASK_DEBUG = process.env.ASK_DEBUG === '1';
+const ASK_DEBUG = getEnv('ASK_DEBUG') === '1';
 
 /** ---------- OpenAI client ---------- */
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -59,6 +60,7 @@ type RollupRow = {
   avg_attendance_strictness: number | null;
   avg_satisfaction: number | null;
   avg_recommendation: number | null;
+  avg_assignment_difficulty?: number | null;
   is_dirty: boolean;
   updated_at: string;
 };
@@ -89,7 +91,7 @@ const PROMPT_DEVELOPER = `
 
 【絶対ルール】
 - DBに存在しない情報（一般的なネット知識）で、特定の授業/大学を断定しておすすめしない。
-- 数字（満足度/おすすめ度/難易度/単位落とす割合など）を出すときは、必ずツール結果に基づく。
+- 数字（おすすめ度/難易度/課題難易度/単位落とす割合など）を出すときは、必ずツール結果に基づく。
 - ツール結果が無いのに「DBでは〜」と言ってはいけない。
 - ツール結果に無い講義内容・試験形式・範囲などを一般知識で書かない。
 - 情報不足の場合は「DBに情報がない/集計中」と明確に伝える。
@@ -102,7 +104,7 @@ const PROMPT_DEVELOPER = `
 - DBから必要な情報が取得できない場合は「キャッピーのデータベースに情報が登録されていない」と正直に伝える。
 - 大学名が省略され、科目名だけが来た場合は、直近の会話やメモリから大学名を推定して検索する。
   推定した場合は「直近の文脈から◯◯大学として検索した」と短く明記する。推定できなければ大学名を聞き返す。
-- 回答には可能なら review_count と主要な平均値（満足度/おすすめ度/難易度）を添える。
+- 回答には可能なら review_count と主要な平均値（おすすめ度/難易度/課題難易度）を添える。
 - 「単位落としてる割合」などは credit_outcomes を使って説明する（母数も書く）。
 - toolの連続呼び出しは最大2回までで完結させる。条件が揃わない場合は聞き返す。
  - 直前の会話で「おすすめ授業」などを提示した後、ユーザーが「その○○について詳しく」と聞いた場合は、
@@ -111,14 +113,14 @@ const PROMPT_DEVELOPER = `
 【質問パターンと推奨ツール】
 1) ランキング/おすすめ系（例: おすすめ授業, 人気授業, ランキング）
    -> resolve_university + top_subjects_by_metric を使う（top3〜5件）。
-2) 難易度/楽単/きつい系（例: 難しい, きつい, 楽, 単位取りやすい）
-   -> top_subjects_by_metric（指標: 難易度/単位の容易さ）。
+2) 難易度/課題難易度/楽単系（例: 難しい, きつい, 楽, 単位取りやすい）
+   -> top_subjects_by_metric（指標: 難易度/課題難易度）。
 3) 個別科目の評価（例: 「統計学基礎ってどう？」）
    -> search_subjects_by_name -> get_subject_rollup。
 4) 科目比較（例: AとBどっちが難しい？）
    -> 両科目を特定して get_subject_rollup で比較。
-5) 単位落とす/出席/課題量（例: 落単率, 出席厳しい？）
-   -> credit_outcomes または rollup の該当指標を提示。
+5) 単位落とす（例: 落単率）
+   -> credit_outcomes を提示。
 6) レビュー引用（例: レビューの例を出して）
    -> top_subjects_with_examples または rollup の要約を使い、短い引用を2〜3件。
 7) 大学が曖昧（例: 「うちの大学で」）
@@ -138,8 +140,8 @@ const PROMPT_DEVELOPER = `
  - 「1科目について詳しく教えて」に該当する質問は、必ず以下の固定フォーマットのみで返す（余計な情報は禁止）。
    1) 大学名/科目名
    2) レビュー数
-   3) 満足度・おすすめ度・難易度（数値はDBから。無ければ「データ不足」）
-   4) 出席・課題・単位の取りやすさ（DBから。無ければ「データ不足」）
+   3) おすすめ度・授業難易度・課題難易度（数値はDBから。無ければ「データ不足」）
+   4) 単位取得状況（DBから。無ければ「データ不足」）
    5) 要約（summary_1000 がある場合のみ。無ければ「集計中」）
    6) 最後に「キャッピーのデータベースからの情報です」
   [Context handling]
@@ -429,12 +431,9 @@ const tools: OpenAI.Responses.Tool[] = [
         metric: {
           type: 'string',
           enum: [
-            'avg_satisfaction',
             'avg_recommendation',
             'avg_class_difficulty',
-            'avg_assignment_load',
-            'avg_attendance_strictness',
-            'avg_credit_ease',
+            'avg_assignment_difficulty',
           ],
         },
         order: { type: 'string', enum: ['asc', 'desc'] },
@@ -458,12 +457,9 @@ const tools: OpenAI.Responses.Tool[] = [
         metric: {
           type: 'string',
           enum: [
-            'avg_satisfaction',
             'avg_recommendation',
             'avg_class_difficulty',
-            'avg_assignment_load',
-            'avg_attendance_strictness',
-            'avg_credit_ease',
+            'avg_assignment_difficulty',
           ],
         },
         order: { type: 'string', enum: ['asc', 'desc'] },
@@ -573,6 +569,55 @@ async function tool_list_subjects_by_university(args: { university_id: string; l
   return (data || []) as SubjectHit[];
 }
 
+async function queryTopSubjectsByAssignmentDifficulty(args: {
+  university_id: string;
+  order: 'asc' | 'desc';
+  limit: number;
+  min_reviews: number;
+}) {
+  const { university_id, order, limit, min_reviews } = args;
+  const { data, error } = await supabaseAdmin
+    .from('course_reviews')
+    .select('subject_id,assignment_difficulty_4,subjects!inner(name,university_id)')
+    .eq('subjects.university_id', university_id)
+    .limit(10000);
+
+  if (error) throw error;
+
+  const stats = new Map<string, { subject_id: string; subject_name: string; sum: number; count: number }>();
+
+  for (const row of data || []) {
+    const v = (row as any).assignment_difficulty_4;
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const subjectId = (row as any).subject_id as string;
+    const subjectName = (row as any).subjects?.name ?? null;
+    if (!subjectId || !subjectName) continue;
+    const cur = stats.get(subjectId) || { subject_id: subjectId, subject_name: subjectName, sum: 0, count: 0 };
+    cur.sum += v;
+    cur.count += 1;
+    stats.set(subjectId, cur);
+  }
+
+  const items = Array.from(stats.values())
+    .filter((x) => x.count >= min_reviews)
+    .map((x) => ({
+      subject_id: x.subject_id,
+      subject_name: x.subject_name,
+      review_count: x.count,
+      metric_value: roundOneDecimal(x.sum / x.count),
+      metric: 'avg_assignment_difficulty' as const,
+    }));
+
+  items.sort((a, b) => {
+    if (a.metric_value === null && b.metric_value === null) return 0;
+    if (a.metric_value === null) return 1;
+    if (b.metric_value === null) return -1;
+    return order === 'asc' ? a.metric_value - b.metric_value : b.metric_value - a.metric_value;
+  });
+
+  return items.slice(0, limit);
+}
+
 /**
  * rollups に「単位取得状況カウント」が載ってる設計に進化してても壊れないように：
  * - rollup は select('*') にして、キーがあればそれを使う
@@ -656,6 +701,23 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
     if (creditHigh === null) creditHigh = _creditHigh;
   }
 
+  let avgAssignmentDifficulty = null as number | null;
+  {
+    const { data: diffRows, error: diffErr } = await supabaseAdmin
+      .from('course_reviews')
+      .select('assignment_difficulty_4')
+      .eq('subject_id', subjectId)
+      .limit(5000);
+
+    if (diffErr) throw diffErr;
+    const vals = (diffRows || [])
+      .map((r: any) => r.assignment_difficulty_4)
+      .filter((v: any) => typeof v === 'number' && Number.isFinite(v)) as number[];
+    if (vals.length > 0) {
+      avgAssignmentDifficulty = vals.reduce((a, b) => a + b, 0) / vals.length;
+    }
+  }
+
     const roundedRollup = rollup
     ? ({
         ...rollup,
@@ -665,6 +727,7 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
         avg_attendance_strictness: roundOneDecimal(rollup.avg_attendance_strictness),
         avg_satisfaction: roundOneDecimal(rollup.avg_satisfaction),
         avg_recommendation: roundOneDecimal(rollup.avg_recommendation),
+        avg_assignment_difficulty: roundOneDecimal(avgAssignmentDifficulty),
       } as RollupRow)
     : null;
 
@@ -688,12 +751,9 @@ async function tool_get_subject_rollup(args: { subject_id: string }) {
 async function tool_top_subjects_by_metric(args: {
   university_id: string;
   metric:
-    | 'avg_satisfaction'
     | 'avg_recommendation'
     | 'avg_class_difficulty'
-    | 'avg_assignment_load'
-    | 'avg_attendance_strictness'
-    | 'avg_credit_ease';
+    | 'avg_assignment_difficulty';
   order: 'asc' | 'desc';
   limit: number;
   min_reviews: number;
@@ -703,6 +763,14 @@ async function tool_top_subjects_by_metric(args: {
   const minReviews = Math.max(0, args.min_reviews || 0);
 
   if (!universityId) return [];
+  if (args.metric === 'avg_assignment_difficulty') {
+    return await queryTopSubjectsByAssignmentDifficulty({
+      university_id: universityId,
+      order: args.order,
+      limit,
+      min_reviews: minReviews,
+    });
+  }
 
   const queryRollups = async (min: number) => {
     const { data, error } = await supabaseAdmin
@@ -750,12 +818,9 @@ async function tool_top_subjects_by_metric(args: {
 async function tool_top_subjects_with_examples(args: {
   university_id: string;
   metric:
-    | 'avg_satisfaction'
     | 'avg_recommendation'
     | 'avg_class_difficulty'
-    | 'avg_assignment_load'
-    | 'avg_attendance_strictness'
-    | 'avg_credit_ease';
+    | 'avg_assignment_difficulty';
   order: 'asc' | 'desc';
   limit: number;
   min_reviews: number;
@@ -767,6 +832,34 @@ async function tool_top_subjects_with_examples(args: {
   const sampleCount = Math.max(1, Math.min(3, args.sample_reviews || 1));
 
   if (!universityId) return [];
+  if (args.metric === 'avg_assignment_difficulty') {
+    const top = await queryTopSubjectsByAssignmentDifficulty({
+      university_id: universityId,
+      order: args.order,
+      limit,
+      min_reviews: minReviews,
+    });
+
+    const withExamples = [];
+    for (const item of top) {
+      const { data: reviews, error: reviewErr } = await supabaseAdmin
+        .from('course_reviews')
+        .select('body_main,created_at')
+        .eq('subject_id', item.subject_id)
+        .order('created_at', { ascending: false })
+        .limit(sampleCount);
+      if (reviewErr) throw reviewErr;
+      withExamples.push({
+        ...item,
+        sample_reviews: (reviews || []).map((r: any) => ({
+          body_main: r.body_main,
+          created_at: r.created_at,
+        })),
+      });
+    }
+
+    return withExamples;
+  }
 
   const queryRollups = async (min: number) => {
     const { data, error } = await supabaseAdmin

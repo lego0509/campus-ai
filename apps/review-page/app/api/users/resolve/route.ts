@@ -3,13 +3,14 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { createHmac } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getEnv } from '@/lib/env';
 
 type Payload = {
   line_user_id: string;
 };
 
 function lineUserIdToHash(lineUserId: string) {
-  const pepper = process.env.LINE_HASH_PEPPER;
+  const pepper = getEnv('LINE_HASH_PEPPER');
   if (!pepper) throw new Error('LINE_HASH_PEPPER is not set');
   return createHmac('sha256', pepper).update(lineUserId, 'utf8').digest('hex');
 }
