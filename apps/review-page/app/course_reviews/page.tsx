@@ -545,6 +545,8 @@ export default function ReviewFormPage() {
         .filter((t, idx, arr) => arr.indexOf(t) === idx)
         .slice(0, TAG_MAX);
 
+      const { assignment_difficulty_4, ...otherRatings } = form.ratings;
+
       // APIが受け取るsnake_case payloadに合わせて組み立てる
       const payload = {
         university_name: form.university.trim(),
@@ -562,9 +564,9 @@ export default function ReviewFormPage() {
         credits_at_take: Number.isFinite(creditsValue) ? creditsValue : null,
 
         performance_self: form.performanceSelf,
-        assignment_difficulty_4: form.ratings.assignment_difficulty_4,
+        assignment_difficulty_4,
 
-        ...form.ratings,
+        ...otherRatings,
 
         body_main: form.comment.trim(),
         hashtags: mergedTags,
