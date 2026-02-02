@@ -74,6 +74,7 @@ const assessmentOptions = [
 ] as const;
 
 type RatingKey = (typeof assessmentOptions)[number]['key'];
+const ratingKeys = assessmentOptions.map((item) => item.key) as RatingKey[];
 
 function buildAcademicYearOptions() {
   const now = new Date();
@@ -162,7 +163,13 @@ export default function ReviewFormPage() {
         hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : prev.hashtags,
         ratings: {
           ...prev.ratings,
-          ...(parsed.ratings && typeof parsed.ratings === 'object' ? parsed.ratings : {}),
+          ...(parsed.ratings && typeof parsed.ratings === 'object'
+            ? Object.fromEntries(
+                ratingKeys
+                  .filter((k) => typeof (parsed.ratings as any)[k] === 'number')
+                  .map((k) => [k, (parsed.ratings as any)[k]])
+              )
+            : {}),
         },
       }));
     } catch {
@@ -420,7 +427,10 @@ export default function ReviewFormPage() {
     if (form.performanceSelf < 1 || form.performanceSelf > 4) return false;
 
     // 5段階：全部必須（難易度・課題難易度・おすすめ度）
-    const hasAllRatings = Object.values(form.ratings).every((val) => val >= 1 && val <= 5);
+    const hasAllRatings = ratingKeys.every((k) => {
+      const val = form.ratings[k];
+      return val >= 1 && val <= 5;
+    });
     if (!hasAllRatings) return false;
 
     // コメント長：コードポイント数で判定（絵文字対策）
