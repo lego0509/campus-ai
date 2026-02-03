@@ -49,6 +49,18 @@ type AskPayload = {
 
 type UniversityHit = { id: string; name: string };
 type SubjectHit = { id: string; name: string; university_id: string };
+type TagSubjectHit = {
+  subject_id: string;
+  subject_name: string | null;
+  university_id: string | null;
+  tag_review_count: number;
+  review_count: number | null;
+  avg_class_difficulty: number | null;
+  avg_assignment_difficulty: number | null;
+  avg_attendance_strictness: number | null;
+  avg_recommendation: number | null;
+  summary_1000?: string | null;
+};
 
 type RollupRow = {
   subject_id: string;
@@ -127,6 +139,8 @@ const PROMPT_DEVELOPER = `
    -> get_my_affiliation で大学が一意なら使用。不明なら大学名を質問。
 8) 科目一覧（例: 「○○大学ってどんな科目がある？」）
    -> resolve_university + list_subjects_by_university で科目名を列挙（上限あり）。
+9) ハッシュタグ検索（例: 「#楽単」「#高難易度 #出席厳しい」）
+   -> search_subjects_by_tags を使って科目一覧を返す。複数タグは AND で絞る。
 
 【出力の雰囲気】
 - LINE想定。長文になりすぎない。必要なら箇条書き。
@@ -174,6 +188,7 @@ DB参照が必要な質問では、必ず tools を呼び出してから回答�
 function shouldForceTool(userMessage: string) {
   const t = (userMessage || '').trim().toLowerCase();
   if (!t) return false;
+  if (t.includes('#') || t.includes('＃')) return true;
 
   // Casual topics that should not force DB tools.
   const casualExcludes = [
@@ -229,6 +244,7 @@ function shouldForceTool(userMessage: string) {
     '少ない',
     '人気',
     '評判',
+    'タグ',
     'レビュー例',
     '一覧',
     '科目一覧',
@@ -280,6 +296,16 @@ function lineUserIdToHash(lineUserId: string) {
 function supabaseErrorToJson(err: any) {
   if (!err) return null;
   return { message: err.message, code: err.code, details: err.details, hint: err.hint };
+}
+
+function normalizeTag(raw: string) {
+  const withoutFullWidthHash = raw.replace(/＃/g, '#').trim();
+  const withoutHash = withoutFullWidthHash.replace(/^#+/, '').trim();
+  const collapsed = withoutHash.replace(/\s+/g, '');
+  const lowered = collapsed.toLowerCase();
+  if (lowered.length === 0) return null;
+  if (Array.from(lowered).length > 12) return null;
+  return lowered;
 }
 
 async function getUserMemorySummary(userId: string) {
@@ -476,6 +502,27 @@ const tools: OpenAI.Responses.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    type: 'function',
+    name: 'search_subjects_by_tags',
+    description:
+      'ハッシュタグ（#楽単 など）で科目を検索し、科目ごとの件数と平均指標を返す。複数タグはANDで絞る。',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'タグ配列（#なし推奨）。最大5件。',
+        },
+        university_id: { type: 'string', description: 'universities.id (uuid) 任意' },
+        limit: { type: 'integer', description: '最大件数（1〜10）' },
+      },
+      required: ['tags', 'limit'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /** ---------- tool実装（Supabaseで安全に実行） ---------- */
@@ -569,6 +616,123 @@ async function tool_list_subjects_by_university(args: { university_id: string; l
 
   if (error) throw error;
   return (data || []) as SubjectHit[];
+}
+
+async function tool_search_subjects_by_tags(args: {
+  tags: string[];
+  university_id?: string;
+  limit: number;
+}) {
+  const limit = Math.max(1, Math.min(10, args.limit || 5));
+  const rawTags = Array.isArray(args.tags) ? args.tags : [];
+  const normalizedTags = rawTags
+    .map((t) => normalizeTag(String(t)))
+    .filter((t): t is string => Boolean(t))
+    .filter((t, idx, arr) => arr.indexOf(t) === idx)
+    .slice(0, 5);
+
+  if (normalizedTags.length === 0) return [] as TagSubjectHit[];
+
+  const { data: tagRows, error: tagErr } = await supabaseAdmin
+    .from('review_tags')
+    .select('id,name')
+    .in('name', normalizedTags);
+  if (tagErr) throw tagErr;
+  const tagIds = (tagRows || []).map((t: any) => t.id);
+  if (tagIds.length === 0) return [] as TagSubjectHit[];
+
+  const { data: rows, error } = await supabaseAdmin
+    .from('course_review_tags')
+    .select('review_id,tag_id,course_reviews(subject_id,subjects(name,university_id))')
+    .in('tag_id', tagIds);
+  if (error) throw error;
+
+  const perSubject = new Map<
+    string,
+    {
+      subject_id: string;
+      subject_name: string | null;
+      university_id: string | null;
+      matchedTags: Set<string>;
+      reviewIds: Set<string>;
+    }
+  >();
+
+  for (const row of rows || []) {
+    const subjectId = (row as any).course_reviews?.subject_id as string | undefined;
+    const subjectName = (row as any).course_reviews?.subjects?.name ?? null;
+    const universityId = (row as any).course_reviews?.subjects?.university_id ?? null;
+    if (!subjectId) continue;
+    if (args.university_id && universityId !== args.university_id) continue;
+
+    const cur =
+      perSubject.get(subjectId) ||
+      ({
+        subject_id: subjectId,
+        subject_name: subjectName,
+        university_id: universityId,
+        matchedTags: new Set<string>(),
+        reviewIds: new Set<string>(),
+      } as const);
+
+    cur.matchedTags.add(String((row as any).tag_id));
+    cur.reviewIds.add(String((row as any).review_id));
+    perSubject.set(subjectId, cur as any);
+  }
+
+  const filtered = Array.from(perSubject.values()).filter(
+    (s) => s.matchedTags.size >= tagIds.length
+  );
+
+  filtered.sort((a, b) => b.reviewIds.size - a.reviewIds.size);
+  const picked = filtered.slice(0, limit);
+  const subjectIds = picked.map((p) => p.subject_id);
+  if (subjectIds.length === 0) return [] as TagSubjectHit[];
+
+  const { data: rollups, error: rollErr } = await supabaseAdmin
+    .from('subject_rollups')
+    .select(
+      'subject_id,review_count,avg_class_difficulty,avg_recommendation,avg_attendance_strictness,summary_1000'
+    )
+    .in('subject_id', subjectIds);
+  if (rollErr) throw rollErr;
+
+  const rollupMap = new Map((rollups || []).map((r: any) => [r.subject_id, r]));
+
+  const { data: diffRows, error: diffErr } = await supabaseAdmin
+    .from('course_reviews')
+    .select('subject_id,assignment_difficulty_4')
+    .in('subject_id', subjectIds)
+    .limit(10000);
+  if (diffErr) throw diffErr;
+
+  const diffAgg = new Map<string, { sum: number; count: number }>();
+  for (const r of diffRows || []) {
+    const v = (r as any).assignment_difficulty_4;
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    const sid = String((r as any).subject_id);
+    const cur = diffAgg.get(sid) || { sum: 0, count: 0 };
+    cur.sum += v;
+    cur.count += 1;
+    diffAgg.set(sid, cur);
+  }
+
+  return picked.map((p) => {
+    const rollup = rollupMap.get(p.subject_id);
+    const diff = diffAgg.get(p.subject_id);
+    return {
+      subject_id: p.subject_id,
+      subject_name: p.subject_name,
+      university_id: p.university_id,
+      tag_review_count: p.reviewIds.size,
+      review_count: rollup?.review_count ?? null,
+      avg_class_difficulty: rollup?.avg_class_difficulty ?? null,
+      avg_assignment_difficulty: diff ? diff.sum / diff.count : null,
+      avg_attendance_strictness: rollup?.avg_attendance_strictness ?? null,
+      avg_recommendation: rollup?.avg_recommendation ?? null,
+      summary_1000: rollup?.summary_1000 ?? null,
+    };
+  });
 }
 
 async function queryTopSubjectsByAssignmentDifficulty(args: {
@@ -955,6 +1119,8 @@ async function callTool(name: string, args: any, ctx: { userId: string }) {
       return await tool_top_subjects_by_metric(args);
     case 'top_subjects_with_examples':
       return await tool_top_subjects_with_examples(args);
+    case 'search_subjects_by_tags':
+      return await tool_search_subjects_by_tags(args);
     default:
       throw new Error(`unknown tool: ${name}`);
   }
