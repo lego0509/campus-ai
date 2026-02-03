@@ -70,6 +70,7 @@ const performanceOptions = [
 const assessmentOptions = [
   { key: 'class_difficulty', label: '授業の難易度（内容）' },
   { key: 'assignment_difficulty_4', label: '課題の難易度' },
+  { key: 'attendance_strictness', label: '出席の厳しさ' },
   { key: 'recommendation', label: 'おすすめ度' },
 ] as const;
 

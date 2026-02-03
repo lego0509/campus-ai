@@ -304,6 +304,9 @@ export async function POST(req: Request) {
       body.class_difficulty > 5 ||
       body.assignment_difficulty_4 < 1 ||
       body.assignment_difficulty_4 > 5 ||
+      body.attendance_strictness == null ||
+      body.attendance_strictness < 1 ||
+      body.attendance_strictness > 5 ||
       body.recommendation < 1 ||
       body.recommendation > 5
     ) {

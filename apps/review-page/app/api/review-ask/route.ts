@@ -91,7 +91,7 @@ const PROMPT_DEVELOPER = `
 
 【絶対ルール】
 - DBに存在しない情報（一般的なネット知識）で、特定の授業/大学を断定しておすすめしない。
-- 数字（おすすめ度/難易度/課題難易度/単位落とす割合など）を出すときは、必ずツール結果に基づく。
+- 数字（おすすめ度/難易度/課題難易度/出席の厳しさ/単位落とす割合など）を出すときは、必ずツール結果に基づく。
 - ツール結果が無いのに「DBでは〜」と言ってはいけない。
 - ツール結果に無い講義内容・試験形式・範囲などを一般知識で書かない。
 - 情報不足の場合は「DBに情報がない/集計中」と明確に伝える。
@@ -104,7 +104,7 @@ const PROMPT_DEVELOPER = `
 - DBから必要な情報が取得できない場合は「キャッピーのデータベースに情報が登録されていない」と正直に伝える。
 - 大学名が省略され、科目名だけが来た場合は、直近の会話やメモリから大学名を推定して検索する。
   推定した場合は「直近の文脈から◯◯大学として検索した」と短く明記する。推定できなければ大学名を聞き返す。
-- 回答には可能なら review_count と主要な平均値（おすすめ度/難易度/課題難易度）を添える。
+- 回答には可能なら review_count と主要な平均値（おすすめ度/難易度/課題難易度/出席の厳しさ）を添える。
 - 「単位落としてる割合」などは credit_outcomes を使って説明する（母数も書く）。
 - toolの連続呼び出しは最大2回までで完結させる。条件が揃わない場合は聞き返す。
  - 直前の会話で「おすすめ授業」などを提示した後、ユーザーが「その○○について詳しく」と聞いた場合は、
@@ -113,8 +113,8 @@ const PROMPT_DEVELOPER = `
 【質問パターンと推奨ツール】
 1) ランキング/おすすめ系（例: おすすめ授業, 人気授業, ランキング）
    -> resolve_university + top_subjects_by_metric を使う（top3〜5件）。
-2) 難易度/課題難易度/楽単系（例: 難しい, きつい, 楽, 単位取りやすい）
-   -> top_subjects_by_metric（指標: 難易度/課題難易度）。
+2) 難易度/課題難易度/出席厳しさ/楽単系（例: 難しい, きつい, 楽, 単位取りやすい）
+   -> top_subjects_by_metric（指標: 難易度/課題難易度/出席の厳しさ）。
 3) 個別科目の評価（例: 「統計学基礎ってどう？」）
    -> search_subjects_by_name -> get_subject_rollup。
 4) 科目比較（例: AとBどっちが難しい？）
@@ -140,7 +140,7 @@ const PROMPT_DEVELOPER = `
  - 「1科目について詳しく教えて」に該当する質問は、必ず以下の固定フォーマットのみで返す（余計な情報は禁止）。
    1) 大学名/科目名
    2) レビュー数
-   3) おすすめ度・授業難易度・課題難易度（数値はDBから。無ければ「データ不足」）
+   3) おすすめ度・授業難易度・課題難易度・出席の厳しさ（数値はDBから。無ければ「データ不足」）
    4) 単位取得状況（DBから。無ければ「データ不足」）
    5) 要約（summary_1000 がある場合のみ。無ければ「集計中」）
    6) 最後に「キャッピーのデータベースからの情報です」
@@ -434,6 +434,7 @@ const tools: OpenAI.Responses.Tool[] = [
             'avg_recommendation',
             'avg_class_difficulty',
             'avg_assignment_difficulty',
+            'avg_attendance_strictness',
           ],
         },
         order: { type: 'string', enum: ['asc', 'desc'] },
@@ -460,6 +461,7 @@ const tools: OpenAI.Responses.Tool[] = [
             'avg_recommendation',
             'avg_class_difficulty',
             'avg_assignment_difficulty',
+            'avg_attendance_strictness',
           ],
         },
         order: { type: 'string', enum: ['asc', 'desc'] },
@@ -753,7 +755,8 @@ async function tool_top_subjects_by_metric(args: {
   metric:
     | 'avg_recommendation'
     | 'avg_class_difficulty'
-    | 'avg_assignment_difficulty';
+    | 'avg_assignment_difficulty'
+    | 'avg_attendance_strictness';
   order: 'asc' | 'desc';
   limit: number;
   min_reviews: number;
@@ -820,7 +823,8 @@ async function tool_top_subjects_with_examples(args: {
   metric:
     | 'avg_recommendation'
     | 'avg_class_difficulty'
-    | 'avg_assignment_difficulty';
+    | 'avg_assignment_difficulty'
+    | 'avg_attendance_strictness';
   order: 'asc' | 'desc';
   limit: number;
   min_reviews: number;
