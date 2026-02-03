@@ -73,7 +73,6 @@ type RollupRow = {
   avg_satisfaction: number | null;
   avg_recommendation: number | null;
   avg_assignment_difficulty?: number | null;
-  avg_attendance_strictness?: number | null;
   is_dirty: boolean;
   updated_at: string;
 };
