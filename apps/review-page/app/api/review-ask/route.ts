@@ -1255,7 +1255,8 @@ async function runAgent(params: {
 
   const developerPrompt = `${PROMPT_DEVELOPER.trim()}\n\n${PROMPT_INSTRUCTIONS.trim()}`;
 
-  const forced: 'auto' | 'required' = shouldForceTool(userMessage) ? 'required' : 'auto';
+  // review-ask はDB専用なので常に tool を必須にする
+  const forced: 'auto' | 'required' = 'required';
   const toolTrace: AgentTraceItem[] = [];
 
   const memoryMsg = memorySummary
