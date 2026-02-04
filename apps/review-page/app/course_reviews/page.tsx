@@ -111,10 +111,11 @@ export default function ReviewFormPage() {
   /**
    * このシステムで使うユーザーID（users.id）
    * - 画面上の表示はこれに寄せる（デバッグや照合が楽）
-   */
+  */
   const [systemUserId, setSystemUserId] = useState<string>('');
   const [popularTags, setPopularTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState<string>('');
+  const [subjectSuggestions, setSubjectSuggestions] = useState<string[]>([]);
 
   // フォーム本体
   const [form, setForm] = useState({
@@ -209,6 +210,42 @@ export default function ReviewFormPage() {
       canceled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    const query = form.courseName.trim();
+    const universityName = form.university.trim();
+
+    if (!query || !universityName) {
+      setSubjectSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({
+          university_name: universityName,
+          q: query,
+          limit: '3',
+        });
+        const res = await fetch(`/api/subjects/suggest?${params.toString()}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) return;
+        const subjects = Array.isArray(json.subjects) ? json.subjects : [];
+        const names = subjects
+          .map((s: any) => (typeof s?.name === 'string' ? s.name : null))
+          .filter((s: string | null): s is string => Boolean(s));
+        if (!canceled) setSubjectSuggestions(names.slice(0, 3));
+      } catch {
+        // 失敗しても入力は継続
+      }
+    }, 250);
+
+    return () => {
+      canceled = true;
+      clearTimeout(timer);
+    };
+  }, [form.courseName, form.university]);
 
   // ----------------------------
   // 1) LIFF init（本番） / ローカルはダミーID（開発）
@@ -368,6 +405,19 @@ export default function ReviewFormPage() {
   };
 
   const normalizedTeacherName = useMemo(() => form.teacherName.trim(), [form.teacherName]);
+  const tagQuery = useMemo(() => {
+    const tokens = tagInput.replace(/＃/g, '#').split(/[\s,]+/).filter(Boolean);
+    const last = tokens.length ? tokens[tokens.length - 1] : '';
+    return normalizeTag(last) ?? '';
+  }, [tagInput]);
+  const tagSuggestions = useMemo(() => {
+    if (!tagQuery) return [];
+    const picked = new Set(form.hashtags);
+    return popularTags
+      .filter((tag) => typeof tag === 'string' && tag.startsWith(tagQuery))
+      .filter((tag) => !picked.has(tag))
+      .slice(0, 5);
+  }, [tagQuery, popularTags, form.hashtags]);
 
   /**
    * 単位数：空ならnull、入力があるなら整数として扱う
@@ -410,6 +460,11 @@ export default function ReviewFormPage() {
 
   const removeTag = (tag: string) => {
     setForm((prev) => ({ ...prev, hashtags: prev.hashtags.filter((t) => t !== tag) }));
+  };
+
+  const applySubjectSuggestion = (name: string) => {
+    setForm((prev) => ({ ...prev, courseName: name }));
+    setSubjectSuggestions([]);
   };
 
   // ----------------------------
@@ -732,13 +787,32 @@ export default function ReviewFormPage() {
                   <span>科目名</span>
                   {requiredBadge(form.courseName.trim().length === 0)}
                 </label>
-                <input
-                  id="courseName"
-                  className="control"
-                  placeholder="例：データベース概論"
-                  value={form.courseName}
-                  onChange={(e) => handleTextChange('courseName', e.target.value)}
-                />
+                <div className="relative">
+                  <input
+                    id="courseName"
+                    className="control"
+                    placeholder="例：データベース概論"
+                    value={form.courseName}
+                    onChange={(e) => handleTextChange('courseName', e.target.value)}
+                  />
+                  {subjectSuggestions.length > 0 ? (
+                    <div className="absolute z-20 mt-2 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-sm">
+                      <p className="mb-1 text-xs text-slate-500">科目サジェスト</p>
+                      <div className="space-y-1">
+                        {subjectSuggestions.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            className="w-full rounded-md px-2 py-1 text-left text-slate-700 hover:bg-slate-50"
+                            onClick={() => applySubjectSuggestion(name)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div className="field-wrapper">
@@ -870,10 +944,34 @@ export default function ReviewFormPage() {
                     }
                   }}
                 />
-                <button type="button" className="button-secondary" onClick={addTagsFromInput}>
+                <button
+                  type="button"
+                  className="button-secondary border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50"
+                  onClick={addTagsFromInput}
+                >
                   追加
                 </button>
               </div>
+              {tagSuggestions.length > 0 ? (
+                <div className="rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-sm">
+                  <p className="mb-1 text-xs text-slate-500">タグ候補</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tagSuggestions.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                        onClick={() => {
+                          addTag(tag);
+                          setTagInput('');
+                        }}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {tagError ? <p className="text-xs text-red-600">{tagError}</p> : null}
               {form.hashtags.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
