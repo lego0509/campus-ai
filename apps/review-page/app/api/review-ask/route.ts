@@ -330,6 +330,87 @@ async function getRecentChatMessages(userId: string, limit = 12) {
   return (data ?? []).reverse();
 }
 
+function extractSubjectCandidatesFromText(text: string) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const candidates: string[] = [];
+
+  for (const line of lines) {
+    let body = line;
+
+    const numbered = body.match(
+      /^(?:[0-9]+|[①-⑩]|[一二三四五六七八九十]+)[\)\.\:、\s]+(.+)$/
+    );
+    if (numbered?.[1]) body = numbered[1];
+    if (body.startsWith('・') || body.startsWith('-')) body = body.slice(1).trim();
+
+    const cut = body.split(/[（(]|[:：]| - |—|─/)[0].trim();
+    if (cut.length >= 2 && cut.length <= 60) {
+      candidates.push(cut);
+    }
+  }
+
+  return candidates.filter((c, idx, arr) => arr.indexOf(c) === idx);
+}
+
+function inferListIndex(userMessage: string, max: number) {
+  const t = userMessage.replace(/\s+/g, '');
+  if (!t) return null;
+
+  if (/最後|一番下|末尾/.test(t)) return max - 1;
+
+  const patterns: Array<{ re: RegExp; idx: number }> = [
+    { re: /1つ目|1番|一番|最初|上から1|1位|一位/, idx: 0 },
+    { re: /2つ目|2番|二番|二つ目|上から2|2位|二位/, idx: 1 },
+    { re: /3つ目|3番|三番|三つ目|上から3|3位|三位/, idx: 2 },
+    { re: /4つ目|4番|四番|四つ目|上から4|4位|四位/, idx: 3 },
+    { re: /5つ目|5番|五番|五つ目|上から5|5位|五位/, idx: 4 },
+  ];
+
+  for (const p of patterns) {
+    if (p.re.test(t)) return p.idx;
+  }
+
+  return null;
+}
+
+function resolveImplicitSubjectFromContext(
+  userMessage: string,
+  recentMessages: { role: string; content: string }[]
+) {
+  const message = userMessage.trim();
+  if (!message || recentMessages.length === 0) return { message, resolvedSubject: null as string | null };
+
+  const lastAssistant = [...recentMessages]
+    .reverse()
+    .find((m) => m.role === 'assistant' && (m.content || '').trim().length > 0);
+  if (!lastAssistant) return { message, resolvedSubject: null as string | null };
+
+  const candidates = extractSubjectCandidatesFromText(lastAssistant.content);
+  if (candidates.length === 0) return { message, resolvedSubject: null as string | null };
+
+  for (const name of candidates) {
+    if (message.includes(name)) return { message, resolvedSubject: name };
+  }
+
+  const refersList = /その中|上の|下の|一覧|さっき|先ほど|候補|おすすめ|リスト/.test(message);
+  if (!refersList && !/その授業|その科目|それ|あれ/.test(message)) {
+    return { message, resolvedSubject: null as string | null };
+  }
+
+  const idx = inferListIndex(message, candidates.length);
+  if (idx !== null && idx >= 0 && idx < candidates.length) {
+    const subject = candidates[idx];
+    return { message: `${subject}について詳しく教えて`, resolvedSubject: subject };
+  }
+
+  if (candidates.length === 1) {
+    const subject = candidates[0];
+    return { message: `${subject}について詳しく教えて`, resolvedSubject: subject };
+  }
+
+  return { message, resolvedSubject: null as string | null };
+}
+
 /** ---------- DBユーティリティ（ユーザーID確定） ---------- */
 async function getOrCreateUserId(lineUserId: string) {
   const hash = lineUserIdToHash(lineUserId);
@@ -408,11 +489,11 @@ const tools: OpenAI.Responses.Tool[] = [
     parameters: {
       type: 'object',
       properties: {
-        university_id: { type: 'string', description: 'universities.id (uuid)' },
+        university_id: { type: 'string', description: 'universities.id (uuid) 任意' },
         keyword: { type: 'string', description: '科目名キーワード（部分一致）' },
         limit: { type: 'integer', description: '最大件数（1〜20）' },
       },
-      required: ['university_id', 'keyword', 'limit'],
+      required: ['keyword', 'limit'],
       additionalProperties: false,
     },
   },
@@ -584,10 +665,18 @@ async function tool_resolve_university(args: { university_name: string; limit: n
   return { picked: candidates.length === 1 ? candidates[0] : null, candidates };
 }
 
-async function tool_search_subjects_by_name(args: { university_id: string; keyword: string; limit: number }) {
-  const universityId = args.university_id;
+async function tool_search_subjects_by_name(
+  args: { university_id?: string; keyword: string; limit: number },
+  ctx: { userId: string }
+) {
+  let universityId = args.university_id;
   const keyword = (args.keyword ?? '').trim();
   const limit = Math.max(1, Math.min(20, args.limit || 10));
+
+  if (!universityId && ctx?.userId) {
+    const aff = await tool_get_my_affiliation({ userId: ctx.userId });
+    universityId = aff?.university_id ?? undefined;
+  }
 
   if (!universityId || !keyword) return [] as SubjectHit[];
 
@@ -1113,7 +1202,7 @@ async function callTool(name: string, args: any, ctx: { userId: string }) {
     case 'resolve_university':
       return await tool_resolve_university(args);
     case 'search_subjects_by_name':
-      return await tool_search_subjects_by_name(args);
+      return await tool_search_subjects_by_name(args, ctx);
     case 'list_subjects_by_university':
       return await tool_list_subjects_by_university(args);
     case 'get_subject_rollup':
@@ -1314,8 +1403,10 @@ export async function POST(req: Request) {
     getRecentChatMessages(userId, 12),
   ]);
 
+  const resolved = resolveImplicitSubjectFromContext(message, recentMessages);
+
   const r = await runAgent({
-    userMessage: message,
+    userMessage: resolved.message,
     userId,
     debug,
     memorySummary,
