@@ -931,9 +931,9 @@ export default function ReviewFormPage() {
 
           <SectionCard title="ハッシュタグ" subtitle="任意：特徴を短くタグ付けできます（最大5個）">
             <div className="space-y-3">
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative">
                 <input
-                  className="control"
+                  className="control pr-12"
                   placeholder="例：#高難易度 #楽単"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
@@ -946,10 +946,11 @@ export default function ReviewFormPage() {
                 />
                 <button
                   type="button"
-                  className="button-secondary border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50"
+                  aria-label="タグを追加"
+                  className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
                   onClick={addTagsFromInput}
                 >
-                  追加
+                  →
                 </button>
               </div>
               {tagSuggestions.length > 0 ? (
