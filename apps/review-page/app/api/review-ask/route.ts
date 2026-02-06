@@ -1401,7 +1401,7 @@ export async function POST(req: Request) {
 // ここでは「会話ログ保存」は webhook 側でやる前提
   const [memorySummary, recentMessages] = await Promise.all([
     getUserMemorySummary(userId),
-    getRecentChatMessages(userId, 12),
+    getRecentChatMessages(userId, 4),
   ]);
 
   const resolved = resolveImplicitSubjectFromContext(message, recentMessages);
