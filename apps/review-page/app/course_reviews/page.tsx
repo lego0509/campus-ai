@@ -12,6 +12,7 @@ const REASON_MAX_CHARS = 60;
 const FORM_STORAGE_KEY = 'course_review_form_v1';
 const TAG_MAX = 5;
 const TAG_MAX_CHARS = 12;
+const PRESENTATION_TAGS = ['高難易度', '出席不要', '課題多め', 'おすすめ', '実践的', '実技'] as const;
 
 /**
  * JSの `.length` は絵文字など（サロゲートペア）でズレることがある。
@@ -418,6 +419,10 @@ export default function ReviewFormPage() {
       .filter((tag) => !picked.has(tag))
       .slice(0, 5);
   }, [tagQuery, popularTags, form.hashtags]);
+
+  const displayPopularTags = useMemo(() => {
+    return PRESENTATION_TAGS.filter((tag) => typeof tag === 'string');
+  }, []);
 
   /**
    * 単位数：空ならnull、入力があるなら整数として扱う
@@ -988,11 +993,11 @@ export default function ReviewFormPage() {
                   ))}
                 </div>
               ) : null}
-              {popularTags.length > 0 ? (
+              {displayPopularTags.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-xs text-gray-500">人気タグ</p>
                   <div className="flex flex-wrap gap-2">
-                    {popularTags.map((tag) => (
+                    {displayPopularTags.map((tag) => (
                       <button
                         key={tag}
                         type="button"
