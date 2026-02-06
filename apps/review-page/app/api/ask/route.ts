@@ -621,11 +621,14 @@ async function tool_list_subjects_by_university(args: { university_id: string; l
   return (data || []) as SubjectHit[];
 }
 
-async function tool_search_subjects_by_tags(args: {
-  tags: string[];
-  university_id?: string;
-  limit: number;
-}) {
+async function tool_search_subjects_by_tags(
+  args: {
+    tags: string[];
+    university_id?: string;
+    limit: number;
+  },
+  ctx: { userId: string }
+) {
   const limit = Math.max(1, Math.min(10, args.limit || 5));
   const rawTags = Array.isArray(args.tags) ? args.tags : [];
   const normalizedTags = rawTags
@@ -635,6 +638,11 @@ async function tool_search_subjects_by_tags(args: {
     .slice(0, 5);
 
   if (normalizedTags.length === 0) return [] as TagSubjectHit[];
+
+  if (!args.university_id && ctx?.userId) {
+    const aff = await tool_get_my_affiliation({ userId: ctx.userId });
+    if (aff?.university_id) args.university_id = aff.university_id;
+  }
 
   const { data: tagRows, error: tagErr } = await supabaseAdmin
     .from('review_tags')
@@ -1116,7 +1124,7 @@ async function callTool(name: string, args: any, ctx: { userId: string }) {
     case 'top_subjects_with_examples':
       return await tool_top_subjects_with_examples(args);
     case 'search_subjects_by_tags':
-      return await tool_search_subjects_by_tags(args);
+      return await tool_search_subjects_by_tags(args, ctx);
     default:
       throw new Error(`unknown tool: ${name}`);
   }
