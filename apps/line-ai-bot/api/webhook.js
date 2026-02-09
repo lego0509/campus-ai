@@ -308,6 +308,9 @@ async function callAskApi(url, lineUserId, message) {
   if (!url) throw new Error("ASK API URL is not set");
 
   const payload = { line_user_id: lineUserId, message };
+  if (getEnv("DEBUG_WEBHOOK") === "1") {
+    console.log("[callAskApi] url", url);
+  }
 
   const controller = new AbortController();
   const timeoutMs = Number(getEnv("ASK_TIMEOUT_MS") || 45000);
