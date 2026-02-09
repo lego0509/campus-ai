@@ -486,7 +486,13 @@ export default async function handler(req, res) {
       let replyText = "";
 
       try {
-        if (shouldUseCompanyAsk(userMessage)) {
+        const normalizedMessage = userMessage.replace(/＃/g, "#");
+        if (normalizedMessage.includes("#")) {
+          const reviewUrl = getEnv("ASK_REVIEW_API_URL") || getEnv("ASK_API_URL");
+          if (!reviewUrl) throw new Error("ASK_REVIEW_API_URL is not set");
+          if (getEnv("DEBUG_WEBHOOK") === "1") console.log("[webhook] -> review-ask (hashtag)");
+          replyText = await callAskApi(reviewUrl, lineUserId, userMessage);
+        } else if (shouldUseCompanyAsk(userMessage)) {
           const companyUrl = getEnv("ASK_COMPANY_API_URL");
           if (!companyUrl) throw new Error("ASK_COMPANY_API_URL is not set");
           if (getEnv("DEBUG_WEBHOOK") === "1") console.log("[webhook] -> company-ask");
