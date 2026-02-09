@@ -750,30 +750,53 @@ async function tool_search_subjects_by_tags(
     if (aff?.university_id) args.university_id = aff.university_id;
   }
 
-  const orConditions = normalizedTags.map((t) => `name.ilike.%${t}%`).join(',');
-  const { data: tagRows, error: tagErr } = await supabaseAdmin
-    .from('review_tags')
-    .select('id,name')
-    .or(orConditions);
-  if (tagErr) throw tagErr;
   const normalizedSet = new Set(normalizedTags);
+  let rows: any[] | null = null;
+  let error: any = null;
   const tagIdToName = new Map<string, string>();
-  for (const t of tagRows || []) {
-    const rawName = String((t as any).name ?? '');
-    const id = String((t as any).id ?? '');
-    const norm = normalizeTag(rawName);
-    if (!id || !norm) continue;
-    if (!normalizedSet.has(norm)) continue;
-    tagIdToName.set(id, norm);
-  }
-  const tagIds = Array.from(tagIdToName.keys());
-  if (tagIds.length === 0) return [] as TagSubjectHit[];
 
-  const { data: rows, error } = await supabaseAdmin
-    .from('course_review_tags')
-    .select('review_id,tag_id,course_reviews(subject_id,subjects(name,university_id))')
-    .in('tag_id', tagIds);
-  if (error) throw error;
+  if (normalizedTags.length === 1) {
+    const needle = normalizedTags[0];
+    ({ data: rows, error } = await supabaseAdmin
+      .from('course_review_tags')
+      .select('review_id,tag_id,review_tags!inner(name),course_reviews(subject_id,subjects(name,university_id))')
+      .ilike('review_tags.name', `%${needle}%`));
+    if (error) throw error;
+
+    for (const row of rows || []) {
+      const rawName = String((row as any).review_tags?.name ?? '');
+      const id = String((row as any).tag_id ?? '');
+      const norm = normalizeTag(rawName);
+      if (!id || !norm) continue;
+      if (!normalizedSet.has(norm)) continue;
+      tagIdToName.set(id, norm);
+    }
+  } else {
+    const orConditions = normalizedTags.map((t) => `name.ilike.%${t}%`).join(',');
+    const { data: tagRows, error: tagErr } = await supabaseAdmin
+      .from('review_tags')
+      .select('id,name')
+      .or(orConditions);
+    if (tagErr) throw tagErr;
+
+    for (const t of tagRows || []) {
+      const rawName = String((t as any).name ?? '');
+      const id = String((t as any).id ?? '');
+      const norm = normalizeTag(rawName);
+      if (!id || !norm) continue;
+      if (!normalizedSet.has(norm)) continue;
+      tagIdToName.set(id, norm);
+    }
+
+    const tagIds = Array.from(tagIdToName.keys());
+    if (tagIds.length === 0) return [] as TagSubjectHit[];
+
+    ({ data: rows, error } = await supabaseAdmin
+      .from('course_review_tags')
+      .select('review_id,tag_id,course_reviews(subject_id,subjects(name,university_id))')
+      .in('tag_id', tagIds));
+    if (error) throw error;
+  }
 
   const buildPerSubject = (universityFilter?: string) => {
     const perSubject = new Map<
