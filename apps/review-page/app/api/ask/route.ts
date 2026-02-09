@@ -552,7 +552,7 @@ async function tool_get_my_affiliation(ctx: { userId: string }) {
 
 async function tool_resolve_university(args: { university_name: string; limit: number }) {
   const rawName = (args.university_name ?? '').trim();
-  const limit = Math.max(1, Math.min(10, args.limit || 5));
+  const limit = Math.max(1, Math.min(5, args.limit || 5));
 
   if (!rawName) return { picked: null, candidates: [] as UniversityHit[] };
 
