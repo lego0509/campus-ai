@@ -744,14 +744,14 @@ async function tool_search_subjects_by_tags(
     .select('id,name')
     .in('name', normalizedTags);
   if (tagErr) throw tagErr;
-  const tagIdMap = new Map<string, string>();
+  const tagIdToName = new Map<string, string>();
   for (const t of tagRows || []) {
     const name = String((t as any).name ?? '');
     const id = String((t as any).id ?? '');
     if (!name || !id) continue;
-    if (!tagIdMap.has(name)) tagIdMap.set(name, id);
+    tagIdToName.set(id, name);
   }
-  const tagIds = Array.from(tagIdMap.values());
+  const tagIds = Array.from(tagIdToName.keys());
   if (tagIds.length === 0) return [] as TagSubjectHit[];
 
   const { data: rows, error } = await supabaseAdmin
@@ -789,13 +789,14 @@ async function tool_search_subjects_by_tags(
           reviewIds: new Set<string>(),
         } as const);
 
-      cur.matchedTags.add(String((row as any).tag_id));
+      const tagName = tagIdToName.get(String((row as any).tag_id));
+      if (tagName) cur.matchedTags.add(tagName);
       cur.reviewIds.add(String((row as any).review_id));
       perSubject.set(subjectId, cur as any);
     }
 
     return Array.from(perSubject.values()).filter(
-      (s) => s.matchedTags.size >= tagIds.length
+      (s) => s.matchedTags.size >= normalizedTags.length
     );
   };
 
