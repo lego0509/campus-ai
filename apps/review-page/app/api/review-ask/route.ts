@@ -739,10 +739,28 @@ async function tool_search_subjects_by_tags(
     if (aff?.university_id) args.university_id = aff.university_id;
   }
 
-  const { data: tagRows, error: tagErr } = await supabaseAdmin
+  const candidateNames = new Set<string>();
+  for (const t of normalizedTags) {
+    candidateNames.add(t);
+    candidateNames.add(`#${t}`);
+    candidateNames.add(`＃${t}`);
+  }
+
+  let tagRows: any[] | null = null;
+  let tagErr: any = null;
+
+  ({ data: tagRows, error: tagErr } = await supabaseAdmin
     .from('review_tags')
     .select('id,name')
-    .in('name', normalizedTags);
+    .in('name', Array.from(candidateNames)));
+
+  if (!tagErr && (!tagRows || tagRows.length === 0)) {
+    const orConditions = normalizedTags.map((t) => `name.ilike.%${t}%`).join(',');
+    ({ data: tagRows, error: tagErr } = await supabaseAdmin
+      .from('review_tags')
+      .select('id,name')
+      .or(orConditions));
+  }
   if (tagErr) throw tagErr;
   const tagIdToName = new Map<string, string>();
   for (const t of tagRows || []) {
