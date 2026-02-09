@@ -811,11 +811,18 @@ async function tool_search_subjects_by_tags(
   if (rollErr) throw rollErr;
 
   const rollupMap = new Map((rollups || []).map((r: any) => [r.subject_id, r]));
+  const eligible = picked.filter((p) => {
+    const rollup = rollupMap.get(p.subject_id);
+    return rollup && typeof rollup.review_count === 'number' && rollup.review_count >= 4;
+  });
+  const limited = eligible.slice(0, limit);
+  const eligibleIds = limited.map((p) => p.subject_id);
+  if (eligibleIds.length === 0) return [] as TagSubjectHit[];
 
   const { data: diffRows, error: diffErr } = await supabaseAdmin
     .from('course_reviews')
     .select('subject_id,assignment_difficulty_4')
-    .in('subject_id', subjectIds)
+    .in('subject_id', eligibleIds)
     .limit(10000);
   if (diffErr) throw diffErr;
 
@@ -830,7 +837,7 @@ async function tool_search_subjects_by_tags(
     diffAgg.set(sid, cur);
   }
 
-  return picked.map((p) => {
+  return limited.map((p) => {
     const rollup = rollupMap.get(p.subject_id);
     const diff = diffAgg.get(p.subject_id);
     return {
