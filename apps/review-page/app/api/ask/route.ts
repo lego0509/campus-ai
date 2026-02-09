@@ -142,6 +142,7 @@ const PROMPT_DEVELOPER = `
 9) ハッシュタグ検索（例: 「#楽単」「#高難易度 #出席厳しい」）
    -> search_subjects_by_tags を使って科目一覧を返す。複数タグは AND で絞る。
       各科目について「そのタグの件数（tag_review_count）」を必ず表示する。
+      表示は最大5件まで。
 
 【出力の雰囲気】
 - LINE想定。長文になりすぎない。必要なら箇条書き。
@@ -632,7 +633,7 @@ async function tool_search_subjects_by_tags(
   },
   ctx: { userId: string }
 ) {
-  const limit = Math.max(1, Math.min(10, args.limit || 5));
+  const limit = 5;
   const rawTags = Array.isArray(args.tags) ? args.tags : [];
   const normalizedTags = rawTags
     .map((t) => normalizeTag(String(t)))
@@ -641,6 +642,8 @@ async function tool_search_subjects_by_tags(
     .slice(0, 5);
 
   if (normalizedTags.length === 0) return [] as TagSubjectHit[];
+
+  const hadUniversityArg = args.university_id !== undefined && args.university_id !== null;
 
   if (!args.university_id && ctx?.userId) {
     const aff = await tool_get_my_affiliation({ userId: ctx.userId });
@@ -661,42 +664,49 @@ async function tool_search_subjects_by_tags(
     .in('tag_id', tagIds);
   if (error) throw error;
 
-  const perSubject = new Map<
-    string,
-    {
-      subject_id: string;
-      subject_name: string | null;
-      university_id: string | null;
-      matchedTags: Set<string>;
-      reviewIds: Set<string>;
+  const buildPerSubject = (universityFilter?: string) => {
+    const perSubject = new Map<
+      string,
+      {
+        subject_id: string;
+        subject_name: string | null;
+        university_id: string | null;
+        matchedTags: Set<string>;
+        reviewIds: Set<string>;
+      }
+    >();
+
+    for (const row of rows || []) {
+      const subjectId = (row as any).course_reviews?.subject_id as string | undefined;
+      const subjectName = (row as any).course_reviews?.subjects?.name ?? null;
+      const universityId = (row as any).course_reviews?.subjects?.university_id ?? null;
+      if (!subjectId) continue;
+      if (universityFilter && universityId !== universityFilter) continue;
+
+      const cur =
+        perSubject.get(subjectId) ||
+        ({
+          subject_id: subjectId,
+          subject_name: subjectName,
+          university_id: universityId,
+          matchedTags: new Set<string>(),
+          reviewIds: new Set<string>(),
+        } as const);
+
+      cur.matchedTags.add(String((row as any).tag_id));
+      cur.reviewIds.add(String((row as any).review_id));
+      perSubject.set(subjectId, cur as any);
     }
-  >();
 
-  for (const row of rows || []) {
-    const subjectId = (row as any).course_reviews?.subject_id as string | undefined;
-    const subjectName = (row as any).course_reviews?.subjects?.name ?? null;
-    const universityId = (row as any).course_reviews?.subjects?.university_id ?? null;
-    if (!subjectId) continue;
-    if (args.university_id && universityId !== args.university_id) continue;
+    return Array.from(perSubject.values()).filter(
+      (s) => s.matchedTags.size >= tagIds.length
+    );
+  };
 
-    const cur =
-      perSubject.get(subjectId) ||
-      ({
-        subject_id: subjectId,
-        subject_name: subjectName,
-        university_id: universityId,
-        matchedTags: new Set<string>(),
-        reviewIds: new Set<string>(),
-      } as const);
-
-    cur.matchedTags.add(String((row as any).tag_id));
-    cur.reviewIds.add(String((row as any).review_id));
-    perSubject.set(subjectId, cur as any);
+  let filtered = buildPerSubject(args.university_id);
+  if (filtered.length === 0 && !hadUniversityArg && args.university_id) {
+    filtered = buildPerSubject();
   }
-
-  const filtered = Array.from(perSubject.values()).filter(
-    (s) => s.matchedTags.size >= tagIds.length
-  );
 
   filtered.sort((a, b) => b.reviewIds.size - a.reviewIds.size);
   const picked = filtered.slice(0, limit);
