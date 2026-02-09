@@ -492,11 +492,11 @@ const tools: OpenAI.Responses.Tool[] = [
     parameters: {
       type: 'object',
       properties: {
-        university_id: { type: 'string', description: 'universities.id (uuid) 任意' },
+        university_id: { type: ['string', 'null'], description: 'universities.id (uuid) 任意' },
         keyword: { type: 'string', description: '科目名キーワード（部分一致）' },
         limit: { type: 'integer', description: '最大件数（1〜20）' },
       },
-      required: ['keyword', 'limit'],
+      required: ['university_id', 'keyword', 'limit'],
       additionalProperties: false,
     },
   },
@@ -669,10 +669,10 @@ async function tool_resolve_university(args: { university_name: string; limit: n
 }
 
 async function tool_search_subjects_by_name(
-  args: { university_id?: string; keyword: string; limit: number },
+  args: { university_id?: string | null; keyword: string; limit: number },
   ctx: { userId: string }
 ) {
-  let universityId = args.university_id;
+  let universityId = args.university_id ?? undefined;
   const keyword = (args.keyword ?? '').trim();
   const limit = Math.max(1, Math.min(20, args.limit || 10));
 
