@@ -308,6 +308,7 @@ async function callAskApi(url, lineUserId, message) {
   if (!url) throw new Error("ASK API URL is not set");
 
   const payload = { line_user_id: lineUserId, message };
+  console.log("[callAskApi] url", url);
   if (getEnv("DEBUG_WEBHOOK") === "1") {
     console.log("[callAskApi] url", url);
   }
@@ -485,7 +486,6 @@ export default async function handler(req, res) {
       let replyText = "";
 
       try {
-        // A) 企業/就活系 → /api/company-ask
         if (shouldUseCompanyAsk(userMessage)) {
           const companyUrl = getEnv("ASK_COMPANY_API_URL");
           if (!companyUrl) throw new Error("ASK_COMPANY_API_URL is not set");
