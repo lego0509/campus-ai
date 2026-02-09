@@ -29,12 +29,23 @@ function requireEnv(name: string, value?: string | null) {
 const OPENAI_API_KEY = requireEnv('OPENAI_API_KEY', getEnv('OPENAI_API_KEY'));
 const QA_MODEL = getEnv('OPENAI_QA_MODEL') || 'gpt-5';
 const LINE_HASH_PEPPER = requireEnv('LINE_HASH_PEPPER', getEnv('LINE_HASH_PEPPER'));
+const SUPABASE_URL = getEnv('SUPABASE_URL');
 
 /**
  * ASK_DEBUG=1 なら、レスポンスに tool 呼び出し履歴を載せる（LINE運用では 0 推奨）
  * もしくは header x-ask-debug: 1 で強制ON
  */
 const ASK_DEBUG = getEnv('ASK_DEBUG') === '1';
+
+function getSupabaseProjectRef() {
+  if (!SUPABASE_URL) return null;
+  try {
+    const host = new URL(SUPABASE_URL).hostname;
+    return host.split('.')[0] || null;
+  } catch {
+    return null;
+  }
+}
 
 /** ---------- OpenAI client ---------- */
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -1374,7 +1385,14 @@ export async function POST(req: Request) {
     user_id: userId,
     answer: r.answer,
     ...(debug
-      ? { debug: { forced_tool: r.forced, tool_calls: r.toolTrace, version: 'force-tool-2026-01-26' } }
+      ? {
+          debug: {
+            forced_tool: r.forced,
+            tool_calls: r.toolTrace,
+            supabase_project_ref: getSupabaseProjectRef(),
+            version: 'force-tool-2026-01-26',
+          },
+        }
       : {}),
   });
 
