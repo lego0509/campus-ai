@@ -676,10 +676,19 @@ async function tool_search_subjects_by_tags(
 
   if (normalizedTags.length === 1) {
     const needle = normalizedTags[0];
-    ({ data: rows, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('course_review_tags')
-      .select('review_id,tag_id,review_tags!inner(name),course_reviews(subject_id,subjects(name,university_id))')
-      .ilike('review_tags.name', `%${needle}%`));
+      .select(
+        'review_id,tag_id,review_tags!inner(name),course_reviews!inner(subject_id,subjects!inner(name,university_id))'
+      )
+      .ilike('review_tags.name', `%${needle}%`)
+      .limit(10000);
+
+    if (args.university_id) {
+      query = query.eq('course_reviews.subjects.university_id', args.university_id);
+    }
+
+    ({ data: rows, error } = await query);
     if (error) throw error;
 
     for (const row of rows || []) {
@@ -710,10 +719,17 @@ async function tool_search_subjects_by_tags(
     const tagIds = Array.from(tagIdToName.keys());
     if (tagIds.length === 0) return [] as TagSubjectHit[];
 
-    ({ data: rows, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('course_review_tags')
-      .select('review_id,tag_id,course_reviews(subject_id,subjects(name,university_id))')
-      .in('tag_id', tagIds));
+      .select('review_id,tag_id,course_reviews!inner(subject_id,subjects!inner(name,university_id))')
+      .in('tag_id', tagIds)
+      .limit(10000);
+
+    if (args.university_id) {
+      query = query.eq('course_reviews.subjects.university_id', args.university_id);
+    }
+
+    ({ data: rows, error } = await query);
     if (error) throw error;
   }
 
