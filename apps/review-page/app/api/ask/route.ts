@@ -655,7 +655,14 @@ async function tool_search_subjects_by_tags(
     .select('id,name')
     .in('name', normalizedTags);
   if (tagErr) throw tagErr;
-  const tagIds = (tagRows || []).map((t: any) => t.id);
+  const tagIdMap = new Map<string, string>();
+  for (const t of tagRows || []) {
+    const name = String((t as any).name ?? '');
+    const id = String((t as any).id ?? '');
+    if (!name || !id) continue;
+    if (!tagIdMap.has(name)) tagIdMap.set(name, id);
+  }
+  const tagIds = Array.from(tagIdMap.values());
   if (tagIds.length === 0) return [] as TagSubjectHit[];
 
   const { data: rows, error } = await supabaseAdmin
