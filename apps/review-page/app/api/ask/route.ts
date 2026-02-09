@@ -661,35 +661,21 @@ async function tool_search_subjects_by_tags(
     if (aff?.university_id) args.university_id = aff.university_id;
   }
 
-  const candidateNames = new Set<string>();
-  for (const t of normalizedTags) {
-    candidateNames.add(t);
-    candidateNames.add(`#${t}`);
-    candidateNames.add(`＃${t}`);
-  }
-
-  let tagRows: any[] | null = null;
-  let tagErr: any = null;
-
-  ({ data: tagRows, error: tagErr } = await supabaseAdmin
+  const orConditions = normalizedTags.map((t) => `name.ilike.%${t}%`).join(',');
+  const { data: tagRows, error: tagErr } = await supabaseAdmin
     .from('review_tags')
     .select('id,name')
-    .in('name', Array.from(candidateNames)));
-
-  if (!tagErr && (!tagRows || tagRows.length === 0)) {
-    const orConditions = normalizedTags.map((t) => `name.ilike.%${t}%`).join(',');
-    ({ data: tagRows, error: tagErr } = await supabaseAdmin
-      .from('review_tags')
-      .select('id,name')
-      .or(orConditions));
-  }
+    .or(orConditions);
   if (tagErr) throw tagErr;
+  const normalizedSet = new Set(normalizedTags);
   const tagIdToName = new Map<string, string>();
   for (const t of tagRows || []) {
-    const name = String((t as any).name ?? '');
+    const rawName = String((t as any).name ?? '');
     const id = String((t as any).id ?? '');
-    if (!name || !id) continue;
-    tagIdToName.set(id, name);
+    const norm = normalizeTag(rawName);
+    if (!id || !norm) continue;
+    if (!normalizedSet.has(norm)) continue;
+    tagIdToName.set(id, norm);
   }
   const tagIds = Array.from(tagIdToName.keys());
   if (tagIds.length === 0) return [] as TagSubjectHit[];
