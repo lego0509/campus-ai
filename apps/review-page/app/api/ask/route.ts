@@ -322,6 +322,14 @@ function normalizeTag(raw: string) {
   if (Array.from(lowered).length > 12) return null;
   return lowered;
 }
+function normalizeTagForSearch(raw: string) {
+  const withoutFullWidthHash = raw.replace(/＃/g, '#').trim();
+  const withoutHash = withoutFullWidthHash.replace(/^#+/, '').trim();
+  const collapsed = withoutHash.replace(/\s+/g, '');
+  const lowered = collapsed.toLowerCase();
+  if (lowered.length === 0) return null;
+  return lowered;
+}
 
 async function getUserMemorySummary(userId: string) {
   const { data, error } = await supabaseAdmin
@@ -677,7 +685,7 @@ async function tool_search_subjects_by_tags(
     for (const row of rows || []) {
       const rawName = String((row as any).review_tags?.name ?? '');
       const id = String((row as any).tag_id ?? '');
-      const norm = normalizeTag(rawName);
+      const norm = normalizeTagForSearch(rawName);
       if (!id || !norm) continue;
       if (!normalizedSet.has(norm)) continue;
       tagIdToName.set(id, norm);
@@ -693,7 +701,7 @@ async function tool_search_subjects_by_tags(
     for (const t of tagRows || []) {
       const rawName = String((t as any).name ?? '');
       const id = String((t as any).id ?? '');
-      const norm = normalizeTag(rawName);
+      const norm = normalizeTagForSearch(rawName);
       if (!id || !norm) continue;
       if (!normalizedSet.has(norm)) continue;
       tagIdToName.set(id, norm);
