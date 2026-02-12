@@ -8,7 +8,8 @@
 .
 ├── apps/
 │   ├── review-page/   # Next.js + LIFF
-│   └── line-ai-bot/   # LINE Webhook
+│   ├── line-ai-bot/   # LINE Webhook
+│   └── subject-browser/ # 公開ブラウザ
 ├── wiki/              # ドキュメント
 └── report.md          # 設計まとめ/DDLメモ
 ```

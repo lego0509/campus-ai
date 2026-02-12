@@ -308,7 +308,6 @@ async function callAskApi(url, lineUserId, message) {
   if (!url) throw new Error("ASK API URL is not set");
 
   const payload = { line_user_id: lineUserId, message };
-  console.log("[callAskApi] url", url);
   if (getEnv("DEBUG_WEBHOOK") === "1") {
     console.log("[callAskApi] url", url);
   }
