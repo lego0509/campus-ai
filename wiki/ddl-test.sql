@@ -70,17 +70,17 @@ CREATE TABLE public.course_reviews (
   department text,
   grade_at_take integer NOT NULL CHECK (grade_at_take >= 1 AND grade_at_take <= 6 OR grade_at_take = 99),
   teacher_names text[] CHECK (teacher_names_optional_valid(teacher_names)),
-  academic_year integer NOT NULL CHECK (academic_year >= 1990 AND academic_year <= 2100),
-  term text NOT NULL CHECK (term = ANY (ARRAY['s1','s2','q1','q2','q3','q4','full','intensive','other'])),
+  academic_year integer CHECK (academic_year >= 1990 AND academic_year <= 2100),
+  term text CHECK (term = ANY (ARRAY['s1','s2','q1','q2','q3','q4','full','intensive','other'])),
   credits_at_take integer CHECK (credits_at_take IS NULL OR credits_at_take > 0),
-  requirement_type_at_take text NOT NULL CHECK (requirement_type_at_take = ANY (ARRAY['required','elective','unknown'])),
+  requirement_type_at_take text CHECK (requirement_type_at_take = ANY (ARRAY['required','elective','unknown'])),
   performance_self integer NOT NULL CHECK (performance_self >= 1 AND performance_self <= 4),
   assignment_difficulty_4 integer NOT NULL CHECK (assignment_difficulty_4 >= 1 AND assignment_difficulty_4 <= 5),
-  credit_ease integer NOT NULL,
+  credit_ease integer,
   class_difficulty integer NOT NULL,
-  assignment_load integer NOT NULL,
+  assignment_load integer,
   attendance_strictness integer NOT NULL,
-  satisfaction integer NOT NULL,
+  satisfaction integer,
   recommendation integer NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   body_main text NOT NULL CHECK (btrim(body_main) <> ''::text),
@@ -320,24 +320,8 @@ CREATE INDEX course_review_tags_tag_id_idx
 CREATE INDEX review_tags_usage_count_idx
   ON public.review_tags(usage_count DESC, name);
 
--- =========================================
--- Course reviews: NULL許容化（運用方針に合わせる）
--- =========================================
-ALTER TABLE public.course_reviews
-  ALTER COLUMN academic_year DROP NOT NULL,
-  ALTER COLUMN term DROP NOT NULL,
-  ALTER COLUMN requirement_type_at_take DROP NOT NULL,
-  ALTER COLUMN credit_ease DROP NOT NULL,
-  ALTER COLUMN assignment_load DROP NOT NULL,
-  ALTER COLUMN attendance_strictness DROP NOT NULL,
-  ALTER COLUMN satisfaction DROP NOT NULL,
-  ALTER COLUMN assignment_difficulty_4 DROP NOT NULL;
-
--- =========================================
--- subject_rollups: 平均値のNULL許容
--- =========================================
-ALTER TABLE public.subject_rollups
-  ALTER COLUMN avg_credit_ease DROP NOT NULL,
-  ALTER COLUMN avg_assignment_load DROP NOT NULL,
-  ALTER COLUMN avg_attendance_strictness DROP NOT NULL,
-  ALTER COLUMN avg_satisfaction DROP NOT NULL;
+CREATE TABLE public.course_review_tags_backup (
+  review_id uuid,
+  tag_id uuid,
+  created_at timestamp with time zone
+);
